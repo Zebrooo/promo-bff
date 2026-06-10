@@ -1,0 +1,31 @@
+{
+  "name": "promozavr",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Promozavr — promo selection service for the site",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1053.0",
+    "@zebrooo/service-ticket": "^0.1.0",
+    "fastify": "^5.2.0",
+    "fastify-metrics": "^13.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
