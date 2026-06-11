@@ -155,7 +155,7 @@ export async function handleEnhancePromo(
   //    pull the largest valid JSON object from the text.
   //    suggestedCpmRub передаётся в санитайзер для bound-check'а на cpm.value
   //    (LLM иногда игнорит prompt и выдумывает «рыночный CPM» — отбрасываем
-  //    значения вне ±50% от нашего baseline).
+  //    значения вне [0.3×, 2.5×] от нашего baseline).
   const suggestedCpmRub = typeof params.draft.suggestedCpmRub === 'number'
     ? params.draft.suggestedCpmRub
     : null;
@@ -249,10 +249,10 @@ function sanitizeSuggestions(
     const c = obj.cpm as Record<string, unknown>;
     const value = typeof c.value === 'number' ? c.value : NaN;
     const reason = typeof c.reason === 'string' && c.reason.trim() !== '' ? c.reason.trim() : null;
-    // Базовая валидация: в диапазоне [1, 50] и с reason.
+    // Базовая валидация: в диапазоне [1, 500] и с reason.
     let pass = validateCpmRange(value) && reason !== null;
     // Hard-bound против "рыночного CPM" из training-датасета: если cabinet
-    // прислал suggestedCpmRub — отбрасываем значения вне [0.5×, 1.5×] от него.
+    // прислал suggestedCpmRub — отбрасываем значения вне [0.3×, 2.5×] от него.
     // Без baseline'а (старые промо-cabinet вызовы) — оставляем только базовую валидацию.
     if (pass && suggestedCpmRub !== null && suggestedCpmRub > 0) {
       const minAllowed = suggestedCpmRub * CPM_BASELINE_MIN_RATIO;

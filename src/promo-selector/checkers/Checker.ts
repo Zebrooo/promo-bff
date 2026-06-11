@@ -10,6 +10,8 @@ export interface CheckContext {
   section?: string;
   /** Page category the user is browsing. */
   category?: string;
+  /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
+  device?: 'desktop' | 'touch';
 }
 
 /** All known supplier ids. */

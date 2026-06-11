@@ -53,6 +53,13 @@ export function validateParams(params: unknown): ValidationResult {
     result.skipCheckers = p.skipCheckers as string[];
   }
 
+  if (p.device !== undefined) {
+    if (p.device !== 'desktop' && p.device !== 'touch') {
+      return { ok: false, error: "params.device must be 'desktop' or 'touch'" };
+    }
+    result.device = p.device;
+  }
+
   if (userObj !== null) {
     result.user = userObj as SelectPromoParams['user'];
   }

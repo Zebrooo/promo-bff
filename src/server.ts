@@ -62,6 +62,11 @@ export interface BuildServerOptions {
 /**
  * Real service-ticket auth when a public key is configured (prod); otherwise the stub
  * (any non-empty Authorization header) for local/dev.
+ *
+ * Fail-closed: in production a missing PROMO_TICKET_PUBLIC_KEY must NOT silently
+ * fall back to the stub authenticator — the stub authorizes ANY request carrying a
+ * non-empty Authorization header, which would open billing/auction/AI to the public.
+ * We refuse to start instead, turning a silent misconfig into a loud crash.
  */
 function defaultAuthenticator(): Authenticator {
   if (config.auth.ticketPublicKey) {
@@ -71,6 +76,17 @@ function defaultAuthenticator(): Authenticator {
       allowedSrc: config.auth.allowedSrc,
     });
   }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'PROMO_TICKET_PUBLIC_KEY is empty: refusing to start in production with stub auth ' +
+        '(it authorizes any non-empty Authorization header). Set the Ed25519 public key.',
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[auth] PROMO_TICKET_PUBLIC_KEY is empty — using STUB authenticator (any non-empty ' +
+      'Authorization header passes). This is for local/dev only; never run prod like this.',
+  );
   return createStubAuthenticator();
 }
 

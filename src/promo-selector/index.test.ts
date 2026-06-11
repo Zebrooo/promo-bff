@@ -44,6 +44,28 @@ describe('selectPromo', () => {
     expect(result?.id).toBe('p');
   });
 
+  it('skips a desktop-only promo at the queue head and falls through for a touch user', async () => {
+    __clearUserDataCache();
+    // Head promo is topline (desktop-only format); next is touch-capable inline.
+    const promos = [makePromo({ id: 'top', format: 'topline' }), makePromo({ id: 'inl', format: 'inline' })];
+    const result = await selectPromo(promos, { ...ctx, device: 'touch' }, { deps: makeDeps() });
+    expect(result?.id).toBe('inl');
+  });
+
+  it('respects an explicit deviceTarget for a touch user', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'd', deviceTarget: 'desktop' }), makePromo({ id: 't', deviceTarget: 'touch' })];
+    const result = await selectPromo(promos, { ...ctx, device: 'touch' }, { deps: makeDeps() });
+    expect(result?.id).toBe('t');
+  });
+
+  it('does not filter by device when the request carries no device', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'top', format: 'topline', deviceTarget: 'desktop' })];
+    const result = await selectPromo(promos, ctx, { deps: makeDeps() });
+    expect(result?.id).toBe('top');
+  });
+
   it('does not load suppliers when only context-only checkers are active', async () => {
     __clearUserDataCache();
     const deps = makeDeps();

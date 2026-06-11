@@ -101,6 +101,34 @@ describe('POST /models', () => {
   });
 });
 
+describe('fail-closed auth', () => {
+  // In the test env PROMO_TICKET_PUBLIC_KEY is unset, so the default authenticator
+  // would fall back to the stub. That is acceptable for dev/test but catastrophic
+  // in production (stub authorizes any Authorization header). buildServer must
+  // refuse to start instead.
+  it('throws when NODE_ENV=production and no ticket public key is configured', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => buildServer({ logger: false })).toThrow(/PROMO_TICKET_PUBLIC_KEY/);
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
+
+  it('does NOT throw outside production (stub auth is allowed for dev)', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      const app = buildServer({ logger: false });
+      expect(app).toBeDefined();
+      void app.close();
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
+});
+
 describe('POST /impressions', () => {
   const postImp = (
     app: ReturnType<typeof buildServer>,

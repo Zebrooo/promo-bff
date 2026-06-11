@@ -4,6 +4,7 @@ import type { Promo } from '../promo-selector/types';
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
 export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
+export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
@@ -53,6 +54,12 @@ export const promoSchema = z.object({
   categories: z.array(z.string().min(1)).optional(),
   audience: audienceSchema.optional(),
   sellerStatus: z.enum(['seller', 'buyer']).optional(),
+  /**
+   * Where the promo may show. Omitted/`'both'` = any device. The BFF
+   * select-promo filters candidates by the request's `device` (см.
+   * DeviceChecker): a `deviceTarget:'desktop'` promo is dropped for a touch
+   * user and vice versa. Mirrors the cabinet schema. */
+  deviceTarget: deviceTargetSchema.optional(),
 });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)

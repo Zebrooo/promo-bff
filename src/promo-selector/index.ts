@@ -19,6 +19,8 @@ export interface SelectPromoContext {
   now: Date;
   section?: string;
   category?: string;
+  /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
+  device?: 'desktop' | 'touch';
 }
 
 export interface SelectPromoOptions {
@@ -53,6 +55,7 @@ export async function selectPromo(
       now: ctx.now,
       section: ctx.section,
       category: ctx.category,
+      device: ctx.device,
     };
     let passed = true;
     for (const c of active) {

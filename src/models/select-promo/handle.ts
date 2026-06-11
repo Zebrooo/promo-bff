@@ -62,6 +62,7 @@ export async function handleSelectPromo(
         now,
         section: params.context?.section,
         category: params.context?.category,
+        device: params.device,
       },
       { skip, deps: { userService, billingService, impressionStore, listingService }, logger },
     );

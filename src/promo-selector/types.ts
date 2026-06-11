@@ -71,4 +71,7 @@ export interface Promo {
   audience?: 'all' | 'authenticated' | 'anonymous';
   /** Restrict to sellers (has active listings) or buyers (none). Omitted = either. */
   sellerStatus?: 'seller' | 'buyer';
+  /** Device gate: 'desktop'/'touch' restricts to that device; 'both'/omitted = any.
+   *  Enforced by the DeviceChecker against the request's `device`. */
+  deviceTarget?: 'desktop' | 'touch' | 'both';
 }

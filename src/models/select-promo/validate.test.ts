@@ -71,6 +71,25 @@ describe('validateParams', () => {
     if (result.ok) expect(result.params.userId).toBe('from-user');
   });
 
+  it('accepts a valid device', () => {
+    for (const device of ['desktop', 'touch'] as const) {
+      const result = validateParams({ userId: 'u1', device });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.params.device).toBe(device);
+    }
+  });
+
+  it('omits device when absent (no device filtering)', () => {
+    const result = validateParams({ userId: 'u1' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.device).toBeUndefined();
+  });
+
+  it('rejects an invalid device value', () => {
+    expect(validateParams({ userId: 'u1', device: 'mobile' }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', device: 1 }).ok).toBe(false);
+  });
+
   it('top-level userId takes precedence over params.user.id', () => {
     const result = validateParams({ userId: 'top', user: { id: 'inner' } });
     expect(result.ok).toBe(true);

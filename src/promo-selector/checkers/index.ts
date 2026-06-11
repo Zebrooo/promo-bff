@@ -3,6 +3,7 @@ import { DateChecker } from './registry/Date';
 import { TargetingChecker } from './registry/Targeting';
 import { AudienceChecker } from './registry/Audience';
 import { ContextChecker } from './registry/Context';
+import { DeviceChecker } from './registry/Device';
 import { SellerChecker } from './registry/Seller';
 import { LimitChecker, CooldownChecker } from './registry/Frequency';
 
@@ -16,6 +17,7 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new TargetingChecker(),
   new AudienceChecker(),
   new ContextChecker(),
+  new DeviceChecker(),
   new SellerChecker(),
   new LimitChecker(),
   new CooldownChecker(),

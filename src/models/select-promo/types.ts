@@ -17,6 +17,13 @@ export interface SelectPromoParams {
   /** Checker names to skip (e.g. ['limit','cooldown']). */
   skipCheckers?: string[];
   /**
+   * Requesting device class. When set, the DeviceChecker drops promos whose
+   * `deviceTarget` or `format` is incompatible (so select-promo falls through
+   * to the next eligible promo). Omitted = no device filtering (back-compat;
+   * gating then stays client-side in the renderer).
+   */
+  device?: 'desktop' | 'touch';
+  /**
    * Inline user context from the client: identity + audience gate. Profile and
    * subscription are sourced by the BFF's userData supplier, not passed in.
    */
