@@ -117,3 +117,86 @@ export function runAuction(
   eligible.sort((a, b) => (b.cpmKopecks - a.cpmKopecks) || (a.id - b.id));
   return eligible[0]!;
 }
+
+export interface FeedFillOptions {
+  /** Size-format the feed wants (block for the grid card, horizontal for the list
+   *  strip). Only candidates whose bannerFormat matches are eligible; omit = any. */
+  format?: string;
+  /** Per-user impression counts (promoId "campaign:<id>" -> times seen), paired
+   *  with freqCap to drop over-exposed campaigns for this viewer. */
+  seenCounts?: Record<string, number>;
+  /** Drop a campaign once this user has seen it >= freqCap times. Skipped when it
+   *  would empty the pool (thin market: a repeat beats a blank feed). */
+  freqCap?: number;
+  /** With >1 advertiser eligible, no single advertiser may take more than this
+   *  fraction of `count` positions (anti-monopoly). Default 0.6. A lone advertiser
+   *  is exempt — it fills the whole feed rather than leave blanks. */
+  maxAdvertiserShare?: number;
+}
+
+/**
+ * Weighted fill for an in-feed cascade. Returns up to `count` positions IN ORDER
+ * (repeats ALLOWED) where higher-cpm campaigns appear proportionally more often.
+ *
+ * Deliberate inverse of allocateAuction's one-campaign+one-advertiser batch rule:
+ * that rule empties feed positions when advertisers are few (the "ads don't repeat"
+ * symptom), whereas a cascade must keep filling. Here the available inventory
+ * repeats — favouring higher bids — so positions never go blank in a thin market.
+ *
+ * Mechanics: smooth weighted round-robin (Nginx SWRR) keyed on cpm — a higher-cpm
+ * campaign is picked more often AND naturally spread out (SWRR interleaves rather
+ * than clusters). Per-pick constraints:
+ *   - eligibility: solvency + budget + page-target (reused checks) + format
+ *   - frequency: drop campaigns this user already saw >= freqCap times, unless
+ *     that empties the pool
+ *   - anti-monopoly: with >1 advertiser, none exceeds maxAdvertiserShare of count
+ * Over-exposure to one viewer is bounded by freqCap, NOT by forbidding repeats —
+ * forbidding back-to-back would defeat the cpm weighting when inventory is thin.
+ * Pure (no I/O); the route handler fetches candidates/balances/impressions and
+ * maps the winners through campaignToAd. Per-fill budget pacing is left to the
+ * per-impression charge + the budget check on the next request.
+ */
+export function allocateFeedFill(
+  candidates: CampaignCandidate[],
+  count: number,
+  ctx: AuctionCheckContext,
+  opts: FeedFillOptions = {},
+  checks: AuctionEligibilityCheck[] = DEFAULT_CHECKS,
+): CampaignCandidate[] {
+  if (count <= 0) return [];
+  let eligible = candidates.filter(
+    (c) => checks.every((chk) => chk.isEligible(c, ctx)) && formatMatches(opts.format, c.bannerFormat),
+  );
+  if (eligible.length === 0) return [];
+
+  // Frequency cap — drop over-exposed campaigns, but never down to an empty feed.
+  if (opts.freqCap !== undefined && opts.seenCounts) {
+    const { seenCounts, freqCap } = opts;
+    const kept = eligible.filter((c) => (seenCounts[`campaign:${c.id}`] ?? 0) < freqCap);
+    if (kept.length > 0) eligible = kept;
+  }
+
+  const distinctAdvertisers = new Set(eligible.map((c) => c.advertiserId)).size;
+  const share = opts.maxAdvertiserShare ?? 0.6;
+  // Lone advertiser fills the whole feed; otherwise cap each advertiser's share.
+  const advCap = distinctAdvertisers > 1 ? Math.max(1, Math.ceil(count * share)) : count;
+
+  const state = eligible.map((c) => ({ c, weight: Math.max(1, c.cpmKopecks), current: 0 }));
+  const advUsed = new Map<string, number>();
+  const out: CampaignCandidate[] = [];
+
+  for (let n = 0; n < count; n++) {
+    const active = state.filter((s) => (advUsed.get(s.c.advertiserId) ?? 0) < advCap);
+    if (active.length === 0) break;
+    const total = active.reduce((sum, s) => sum + s.weight, 0);
+    for (const s of active) s.current += s.weight;
+    // SWRR pick: highest running current, tie-break lower id (older campaign).
+    const winner = active.reduce((best, s) =>
+      s.current > best.current || (s.current === best.current && s.c.id < best.c.id) ? s : best,
+    );
+    winner.current -= total;
+    advUsed.set(winner.c.advertiserId, (advUsed.get(winner.c.advertiserId) ?? 0) + 1);
+    out.push(winner.c);
+  }
+  return out;
+}

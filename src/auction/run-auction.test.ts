@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runAuction, solvencyCheck, budgetCheck, pageTargetCheck, allocateAuction } from './run-auction';
+import { runAuction, solvencyCheck, budgetCheck, pageTargetCheck, allocateAuction, allocateFeedFill } from './run-auction';
 import type { CampaignCandidate } from '../services/campaign-service';
 
 function cand(id: number, advertiserId: string, cpmKopecks: number): CampaignCandidate {
@@ -251,5 +251,104 @@ describe('allocateAuction — format matching', () => {
       { balances },
     );
     expect(out.get('legacy')?.id).toBe(1);
+  });
+});
+
+/** Banner candidate for the feed-fill tests: explicit advertiser + format + budget. */
+function feed(
+  id: number,
+  advertiserId: string,
+  cpmKopecks: number,
+  bannerFormat = 'block',
+  o: { spent?: number; budget?: number | null; targetPages?: string[] | null } = {},
+): CampaignCandidate {
+  return {
+    id, advertiserId, cpmKopecks,
+    creative: { format: 'banner', title: 't' },
+    spentKopecks: o.spent ?? 0,
+    totalBudgetKopecks: o.budget ?? null,
+    targetPages: o.targetPages ?? null,
+    bannerFormat,
+  };
+}
+
+describe('allocateFeedFill', () => {
+  const bal = (...advs: string[]) => new Map(advs.map((a) => [a, 100_000] as const));
+
+  it('returns [] for no candidates or non-positive count', () => {
+    expect(allocateFeedFill([], 5, { balances: bal() })).toEqual([]);
+    expect(allocateFeedFill([feed(1, 'A', 5000)], 0, { balances: bal('A') })).toEqual([]);
+  });
+
+  it('a lone campaign repeats to fill every position (no blanks)', () => {
+    const out = allocateFeedFill([feed(1, 'A', 5000)], 5, { balances: bal('A') });
+    expect(out.length).toBe(5);
+    expect(out.every((c) => c.id === 1)).toBe(true);
+  });
+
+  it('higher cpm appears proportionally more often', () => {
+    const out = allocateFeedFill([feed(1, 'A', 9000), feed(2, 'A', 1000)], 10, { balances: bal('A') });
+    expect(out.length).toBe(10);
+    const hi = out.filter((c) => c.id === 1).length;
+    const lo = out.filter((c) => c.id === 2).length;
+    expect(hi).toBeGreaterThan(lo);
+  });
+
+  it('caps one advertiser to maxAdvertiserShare when others exist, favouring the dearer', () => {
+    const out = allocateFeedFill([feed(1, 'A', 9000), feed(2, 'B', 1000)], 10, { balances: bal('A', 'B') });
+    const a = out.filter((c) => c.advertiserId === 'A').length;
+    const b = out.filter((c) => c.advertiserId === 'B').length;
+    expect(a).toBeLessThanOrEqual(Math.ceil(10 * 0.6)); // anti-monopoly
+    expect(b).toBeGreaterThan(0);
+    expect(a).toBeGreaterThanOrEqual(b); // dearer wins more
+  });
+
+  it('a lone advertiser is exempt from the share cap (fills all positions)', () => {
+    const out = allocateFeedFill([feed(1, 'A', 9000), feed(2, 'A', 1000)], 10, { balances: bal('A') });
+    expect(out.length).toBe(10);
+  });
+
+  it('drops a campaign the user has seen >= freqCap times (alternative exists)', () => {
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000), feed(2, 'B', 1000)],
+      6,
+      { balances: bal('A', 'B') },
+      { seenCounts: { 'campaign:1': 5 }, freqCap: 5 },
+    );
+    expect(out.some((c) => c.id === 1)).toBe(false);
+    expect(out.every((c) => c.id === 2)).toBe(true);
+  });
+
+  it('ignores the freq cap when honouring it would empty the feed', () => {
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000)],
+      4,
+      { balances: bal('A') },
+      { seenCounts: { 'campaign:1': 99 }, freqCap: 5 },
+    );
+    expect(out.length).toBe(4);
+    expect(out.every((c) => c.id === 1)).toBe(true);
+  });
+
+  it('only fills with creatives matching the requested format', () => {
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000, 'horizontal'), feed(2, 'B', 1000, 'block')],
+      5,
+      { balances: bal('A', 'B') },
+      { format: 'block' },
+    );
+    expect(out.length).toBe(5);
+    expect(out.every((c) => c.id === 2)).toBe(true);
+  });
+
+  it('excludes insolvent and over-budget campaigns (reuses the checks)', () => {
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000, 'block', { spent: 30_000, budget: 30_000 }), feed(2, 'B', 1000)],
+      5,
+      { balances: bal('A', 'B') },
+    );
+    expect(out.every((c) => c.id === 2)).toBe(true);
+    const insolvent = allocateFeedFill([feed(1, 'A', 9000)], 5, { balances: new Map([['A', 0]]) });
+    expect(insolvent).toEqual([]);
   });
 });

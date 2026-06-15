@@ -16,7 +16,8 @@ import { isModelName, modelRegistry } from './models/registry';
 import type { SelectPromoDeps } from './models/select-promo/handle';
 import type { ModelResult } from './models/select-promo/types';
 import { handleAuction, type AuctionDeps } from './models/auction/handle';
-import { validateAuctionParams } from './models/auction/validate';
+import { handleFeedFill, type FeedFillDeps } from './models/auction/feed-fill';
+import { validateAuctionParams, validateFeedFillParams } from './models/auction/validate';
 import { handleEnhancePromo, type EnhanceDeps, type CachedSuggestion } from './models/enhance-promo/handle';
 import { validateEnhanceParams } from './models/enhance-promo/validate';
 import { handleEnhanceBannerImage, type EnhanceBannerImageDeps, type CachedBannerImage } from './models/enhance-banner-image/handle';
@@ -111,6 +112,17 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const auctionDeps: AuctionDeps = {
     campaignService: createCampaignService(),
     balanceService: createBalanceService(),
+    logger: app.log,
+    ...opts.deps,
+  };
+
+  // Feed-fill reuses the auction's campaign + balance services and the
+  // select-promo impression store (for the frequency cap). Same test-injection
+  // override (opts.deps) as the other dep bundles.
+  const feedFillDeps: FeedFillDeps = {
+    campaignService: auctionDeps.campaignService,
+    balanceService: auctionDeps.balanceService,
+    impressionStore: deps.impressionStore,
     logger: app.log,
     ...opts.deps,
   };
@@ -240,6 +252,27 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const result = await handleAuction(validation.params, auctionDeps);
     if (result.status === 'error') {
       return reply.code(200).send(result); // 200-envelope policy; consumer treats non-map as empty
+    }
+    return reply.code(200).send(result.data);
+  });
+
+  // B2C in-feed cascade fill. Returns an ORDERED Advertisement[] (repeats
+  // allowed, cpm-weighted), length <= count, for the feed's every-N positions.
+  // Same service-ticket auth + 200-envelope policy as /auction.
+  app.post('/feed-fill', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+
+    const validation = validateFeedFillParams(request.body ?? {});
+    if (!validation.ok) {
+      return reply.code(400).send({ error: 'bad_request', reason: validation.error });
+    }
+
+    const result = await handleFeedFill(validation.params, feedFillDeps);
+    if (result.status === 'error') {
+      return reply.code(200).send(result); // 200-envelope; consumer treats non-array as empty
     }
     return reply.code(200).send(result.data);
   });

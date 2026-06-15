@@ -26,4 +26,25 @@ export type AuctionResult =
   | { status: 'ok'; data: AuctionBatchData }
   | { status: 'error'; reason: string };
 
+export interface FeedFillParams {
+  /** Number of in-feed positions to fill (the cascade depth requested). */
+  count: number;
+  /** Page key for targeting (e.g. "catalog-transport"). */
+  page?: string;
+  /** Viewer identity — used for the frequency cap (reads the impression store). */
+  userId?: string;
+  authenticated?: boolean;
+  /** Size-format the feed wants (block for the grid card, horizontal for the list strip). */
+  format?: string;
+  /** Drop a campaign once this viewer has seen it >= freqCap times. Omit = no cap. */
+  freqCap?: number;
+}
+
+/** Ordered fill (repeats allowed): the sequence of creatives to drop into the feed. */
+export type FeedFillData = Advertisement[];
+
+export type FeedFillResult =
+  | { status: 'ok'; data: FeedFillData }
+  | { status: 'error'; reason: string };
+
 export type { ModelResult };
