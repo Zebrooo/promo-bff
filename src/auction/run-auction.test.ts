@@ -319,15 +319,37 @@ describe('allocateFeedFill', () => {
     expect(out.every((c) => c.id === 2)).toBe(true);
   });
 
-  it('ignores the freq cap when honouring it would empty the feed', () => {
+  it('a lone campaign at/over the freq cap stops showing — the cap bites (empty)', () => {
     const out = allocateFeedFill(
       [feed(1, 'A', 9000)],
       4,
       { balances: bal('A') },
       { seenCounts: { 'campaign:1': 99 }, freqCap: 5 },
     );
-    expect(out.length).toBe(4);
+    expect(out).toEqual([]); // no "repeat beats a blank" fallback — slot yields to the next listing
+  });
+
+  it('caps a campaign to its REMAINING hour budget within one fill', () => {
+    // seen 3 of 5 this hour → only 2 more appearances allowed, even though count=10.
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000)],
+      10,
+      { balances: bal('A') },
+      { seenCounts: { 'campaign:1': 3 }, freqCap: 5 },
+    );
+    expect(out.length).toBe(2);
     expect(out.every((c) => c.id === 1)).toBe(true);
+  });
+
+  it('applies the day backstop (most-restrictive of hour/day wins)', () => {
+    // hour budget = 5 (unseen this hour) but day budget = 0 (seen 20 of 20 today).
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000)],
+      10,
+      { balances: bal('A') },
+      { seenCounts: {}, freqCap: 5, seenCountsDay: { 'campaign:1': 20 }, freqCapDay: 20 },
+    );
+    expect(out).toEqual([]);
   });
 
   it('only fills with creatives matching the requested format', () => {
