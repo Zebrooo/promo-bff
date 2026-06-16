@@ -13,7 +13,8 @@ function cand(id: number, advertiserId: string, cpmKopecks: number, bannerFormat
 function makeDeps(
   candidates: CampaignCandidate[],
   balances: Record<string, number>,
-  impressions: Record<string, number> = {},
+  hourCounts: Record<string, number> = {},
+  dayCounts: Record<string, number> = {},
 ): FeedFillDeps {
   return {
     campaignService: {
@@ -23,9 +24,8 @@ function makeDeps(
     balanceService: {
       getBalances: async (ids: string[]) => new Map(ids.map((id) => [id, balances[id] ?? 0])),
     },
-    impressionStore: {
-      getImpressions: async () => ({ counts: impressions, lastShownAt: {} }),
-      recordImpression: async () => {},
+    feedFrequencyService: {
+      getViewCounts: async () => ({ hour: hourCounts, day: dayCounts }),
     },
   };
 }

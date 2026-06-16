@@ -7,6 +7,7 @@ import { createConfigService } from './services/config-service';
 import { createUserService } from './services/user-service';
 import { createBillingService } from './services/billing-service';
 import { createImpressionStore } from './services/impression-store';
+import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
 import { createListingService } from './services/listing-service';
@@ -116,13 +117,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     ...opts.deps,
   };
 
-  // Feed-fill reuses the auction's campaign + balance services and the
-  // select-promo impression store (for the frequency cap). Same test-injection
-  // override (opts.deps) as the other dep bundles.
+  // Feed-fill reuses the auction's campaign + balance services, plus a dedicated
+  // feed-frequency service (banner_view_events rolling counts) for the cap. Same
+  // test-injection override (opts.deps) as the other dep bundles.
   const feedFillDeps: FeedFillDeps = {
     campaignService: auctionDeps.campaignService,
     balanceService: auctionDeps.balanceService,
-    impressionStore: deps.impressionStore,
+    feedFrequencyService: createFeedFrequencyService(),
     logger: app.log,
     ...opts.deps,
   };

@@ -122,12 +122,19 @@ export interface FeedFillOptions {
   /** Size-format the feed wants (block for the grid card, horizontal for the list
    *  strip). Only candidates whose bannerFormat matches are eligible; omit = any. */
   format?: string;
-  /** Per-user impression counts (promoId "campaign:<id>" -> times seen), paired
-   *  with freqCap to drop over-exposed campaigns for this viewer. */
+  /** Per-viewer view counts in the rolling HOUR ("campaign:<id>" -> times seen),
+   *  paired with freqCap. */
   seenCounts?: Record<string, number>;
-  /** Drop a campaign once this user has seen it >= freqCap times. Skipped when it
-   *  would empty the pool (thin market: a repeat beats a blank feed). */
+  /** Per-viewer view counts in the rolling DAY ("campaign:<id>" -> times seen),
+   *  paired with freqCapDay (optional backstop). */
+  seenCountsDay?: Record<string, number>;
+  /** Rolling-hour cap: a campaign may be shown at most freqCap times/hour to this
+   *  viewer. The cap BITES — a campaign at its cap is hard-excluded; we do NOT fall
+   *  back to over-exposed creatives (an empty in-feed slot just yields to the next
+   *  listing). Omit = no cap (a lone campaign then fills the whole feed). */
   freqCap?: number;
+  /** Optional rolling-day backstop, combined with freqCap (most-restrictive wins). */
+  freqCapDay?: number;
   /** With >1 advertiser eligible, no single advertiser may take more than this
    *  fraction of `count` positions (anti-monopoly). Default 0.6. A lone advertiser
    *  is exempt — it fills the whole feed rather than leave blanks. */
@@ -169,11 +176,22 @@ export function allocateFeedFill(
   );
   if (eligible.length === 0) return [];
 
-  // Frequency cap — drop over-exposed campaigns, but never down to an empty feed.
-  if (opts.freqCap !== undefined && opts.seenCounts) {
-    const { seenCounts, freqCap } = opts;
-    const kept = eligible.filter((c) => (seenCounts[`campaign:${c.id}`] ?? 0) < freqCap);
-    if (kept.length > 0) eligible = kept;
+  // Compound frequency cap → per-campaign APPEARANCE BUDGET: how many more times
+  // this campaign may be shown to this viewer right now (min over the hour cap and
+  // the optional day backstop). budget 0 = HARD-excluded — the cap is meant to
+  // bite, so we deliberately do NOT fall back to over-exposed creatives; an empty
+  // in-feed slot simply yields to the next listing.
+  const budgetOf = (c: CampaignCandidate): number => {
+    if (opts.freqCap === undefined) return Number.POSITIVE_INFINITY;
+    let b = opts.freqCap - (opts.seenCounts?.[`campaign:${c.id}`] ?? 0);
+    if (opts.freqCapDay !== undefined) {
+      b = Math.min(b, opts.freqCapDay - (opts.seenCountsDay?.[`campaign:${c.id}`] ?? 0));
+    }
+    return Math.max(0, b);
+  };
+  if (opts.freqCap !== undefined) {
+    eligible = eligible.filter((c) => budgetOf(c) > 0);
+    if (eligible.length === 0) return [];
   }
 
   const distinctAdvertisers = new Set(eligible.map((c) => c.advertiserId)).size;
@@ -183,10 +201,17 @@ export function allocateFeedFill(
 
   const state = eligible.map((c) => ({ c, weight: Math.max(1, c.cpmKopecks), current: 0 }));
   const advUsed = new Map<string, number>();
+  const usedByCampaign = new Map<number, number>();
   const out: CampaignCandidate[] = [];
 
   for (let n = 0; n < count; n++) {
-    const active = state.filter((s) => (advUsed.get(s.c.advertiserId) ?? 0) < advCap);
+    // A campaign stays active until it hits its advertiser's share cap OR its own
+    // per-viewer appearance budget (the frequency cap, enforced within this fill too).
+    const active = state.filter(
+      (s) =>
+        (advUsed.get(s.c.advertiserId) ?? 0) < advCap &&
+        (usedByCampaign.get(s.c.id) ?? 0) < budgetOf(s.c),
+    );
     if (active.length === 0) break;
     const total = active.reduce((sum, s) => sum + s.weight, 0);
     for (const s of active) s.current += s.weight;
@@ -196,6 +221,7 @@ export function allocateFeedFill(
     );
     winner.current -= total;
     advUsed.set(winner.c.advertiserId, (advUsed.get(winner.c.advertiserId) ?? 0) + 1);
+    usedByCampaign.set(winner.c.id, (usedByCampaign.get(winner.c.id) ?? 0) + 1);
     out.push(winner.c);
   }
   return out;
