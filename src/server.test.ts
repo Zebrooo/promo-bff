@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { register as promRegister } from 'prom-client';
 import type { LightMyRequestResponse } from 'fastify';
 import { buildServer } from './server';
+
+beforeEach(() => { promRegister.clear(); });
+afterEach(() => { promRegister.clear(); });
 import type { ConfigService } from './services/config-service';
 import type { CampaignService } from './services/campaign-service';
 import type { BalanceService } from './services/balance-service';
@@ -528,6 +532,63 @@ describe('Analytics routes', () => {
     await POSTS(app, '/analytics/onboarding/funnel', { days: 9999 });
     expect(calls).toEqual([7, 30]);
 
+    await app.close();
+  });
+});
+
+import type { ErrorStore } from './services/error-store';
+
+describe('POST /errors', () => {
+  const okStore = (): ErrorStore => ({ recordError: async () => {} });
+
+  it('returns 401 without an Authorization header', async () => {
+    const app = buildServer({ logger: false, deps: { errorStore: okStore() } });
+    const res = await app.inject({ method: 'POST', url: '/errors', payload: { service: 'abkhaz-auto', message: 'x' } });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns 400 when service or message is missing', async () => {
+    const app = buildServer({ logger: false, deps: { errorStore: okStore() } });
+    const res = await app.inject({ method: 'POST', url: '/errors', headers: { authorization: 'Bearer t' }, payload: { message: 'x' } });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('returns 200 and forwards to the error store', async () => {
+    const recordError = vi.fn<(payload: import('./services/error-store').ErrorPayload) => Promise<void>>(async () => {});
+    const app = buildServer({ logger: false, deps: { errorStore: { recordError } } });
+    const res = await app.inject({
+      method: 'POST', url: '/errors', headers: { authorization: 'Bearer t' },
+      payload: { service: 'abkhaz-auto', source: 'browser', message: 'boom', errorType: 'TypeError' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(recordError).toHaveBeenCalledOnce();
+    expect(recordError.mock.calls[0][0]).toMatchObject({ service: 'abkhaz-auto', source: 'browser', message: 'boom' });
+    await app.close();
+  });
+
+  it('returns 502 when the error store write fails', async () => {
+    const app = buildServer({ logger: false, deps: { errorStore: { recordError: async () => { throw new Error('down'); } } } });
+    const res = await app.inject({ method: 'POST', url: '/errors', headers: { authorization: 'Bearer t' }, payload: { service: 'abkhaz-auto', message: 'boom' } });
+    expect(res.statusCode).toBe(502);
+    await app.close();
+  });
+});
+
+describe('health probes', () => {
+  it('GET /health is 200 and unauthenticated', async () => {
+    const app = buildServer({ logger: false });
+    const res = await app.inject({ method: 'GET', url: '/health' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'ok' });
+    await app.close();
+  });
+
+  it('GET /ready is 200 when AA Supabase is unconfigured (dev)', async () => {
+    const app = buildServer({ logger: false });
+    const res = await app.inject({ method: 'GET', url: '/ready' });
+    expect(res.statusCode).toBe(200);
     await app.close();
   });
 });

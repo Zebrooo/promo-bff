@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import { fileURLToPath } from 'node:url';
 import { config } from './config';
 import { createStubAuthenticator, type Authenticator } from './auth';
@@ -9,7 +9,9 @@ import { createBillingService } from './services/billing-service';
 import { createImpressionStore } from './services/impression-store';
 import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
+import { createErrorStore, type ErrorStore } from './services/error-store';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
+import { withTimeout } from './util/with-timeout';
 import { createListingService } from './services/listing-service';
 import { createCampaignService } from './services/campaign-service';
 import { createBalanceService } from './services/balance-service';
@@ -45,7 +47,7 @@ export interface BuildServerOptions {
       AuctionDeps &
       EnhanceDeps &
       EnhanceBannerImageDeps &
-      { chargeService: ChargeService; eventStore: EventStore; analyticsStore: AnalyticsStore }
+      { chargeService: ChargeService; eventStore: EventStore; analyticsStore: AnalyticsStore; errorStore: ErrorStore }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
   logger?: boolean;
@@ -97,7 +99,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Prometheus metrics at /metrics (http_request_duration_seconds by route/status
   // + default process/event-loop metrics). Scraped locally by Prometheus.
-  app.register(metricsPlugin, { endpoint: '/metrics' });
+  // clearRegisterOnInit: true keeps the global prom-client registry clean when
+  // buildServer() is called multiple times in tests (prevents "already registered" errors).
+  app.register(metricsPlugin, { endpoint: '/metrics', clearRegisterOnInit: true });
   const authenticator = opts.authenticator ?? defaultAuthenticator();
 
   const deps: SelectPromoDeps = {
@@ -161,6 +165,31 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // UX-event sink — writes to abkhaz-auto Supabase (user_action_events).
   // No-op when AA_SUPABASE_URL/KEY env vars are empty (dev/tests).
   const eventStore: EventStore = opts.deps?.eventStore ?? createEventStore();
+
+  // Error sink — writes to abkhaz-auto Supabase (error_events). No-op when unconfigured.
+  const errorStore: ErrorStore = opts.deps?.errorStore ?? createErrorStore();
+
+  // Global capture: log (existing behavior) + record to error_events. Only fires on
+  // UNHANDLED throws inside handlers (per-route 502s return before throwing).
+  app.setErrorHandler<FastifyError>((error, request, reply) => {
+    const statusCode = error.statusCode ?? 500;
+    app.log.error({ err: error }, `unhandled error: ${request.method} ${request.url}`);
+    void errorStore
+      .recordError({
+        service: config.auth.serviceName,
+        source: 'server',
+        level: statusCode >= 500 ? 'error' : 'warning',
+        message: error.message,
+        errorType: error.name,
+        stack: error.stack ?? null,
+        route: request.url,
+        method: request.method,
+        statusCode,
+        userAgent: (request.headers['user-agent'] as string) ?? null,
+      })
+      .catch(() => {});
+    reply.code(statusCode).send({ error: statusCode >= 500 ? 'internal_error' : 'bad_request' });
+  });
 
   // Analytics RPC reader — читает user_actions_* (миграция 0064) и
   // promo_analytics_* (миграция 0066) из той же AA Supabase. No-op store
@@ -356,6 +385,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(502).send({ error: 'event_store_unavailable' });
     }
 
+    return reply.code(200).send({ ok: true });
+  });
+
+  // Error ingestion. Frontends (abkhaz-auto / cabinet /api/track-error) forward
+  // client + server errors here. Same service-ticket auth as /events.
+  app.post('/errors', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+    const b = (request.body ?? {}) as Record<string, unknown>;
+    const service = typeof b.service === 'string' ? b.service.trim() : '';
+    const message = typeof b.message === 'string' ? b.message.trim().slice(0, 2048) : '';
+    if (!service || !message) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'service and message required' });
+    }
+    const ctx = typeof b.context === 'object' && b.context !== null && !Array.isArray(b.context)
+      ? (b.context as Record<string, unknown>) : {};
+    try {
+      await errorStore.recordError({
+        service,
+        source: typeof b.source === 'string' ? b.source : 'browser',
+        level: typeof b.level === 'string' ? b.level : 'error',
+        environment: typeof b.environment === 'string' ? b.environment : undefined,
+        message,
+        errorType: typeof b.errorType === 'string' ? b.errorType : null,
+        stack: typeof b.stack === 'string' ? b.stack.slice(0, 16384) : null,
+        release: typeof b.release === 'string' ? b.release : null,
+        route: typeof b.route === 'string' ? b.route : null,
+        method: typeof b.method === 'string' ? b.method : null,
+        statusCode: typeof b.statusCode === 'number' ? b.statusCode : null,
+        userId: typeof b.userId === 'string' && b.userId ? b.userId : null,
+        sessionId: typeof b.sessionId === 'string' ? b.sessionId : null,
+        userAgent: typeof b.userAgent === 'string' ? b.userAgent.slice(0, 512) : null,
+        context: ctx,
+      });
+    } catch (err) {
+      app.log.error({ err }, 'POST /errors: error store write failed');
+      return reply.code(502).send({ error: 'error_store_unavailable' });
+    }
     return reply.code(200).send({ ok: true });
   });
 
@@ -574,6 +643,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.code(result.status).send({ ok: result.ok });
   });
 
+  // Liveness + readiness probes (unauthenticated — for the orchestrator, not data).
+  app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/ready', async (_request, reply) => {
+    const { url } = config.aaSupabase;
+    if (!url) return { status: 'ok', note: 'aa-supabase unconfigured' };
+    try {
+      await withTimeout(fetch(`${url}/rest/v1/`, { method: 'HEAD' }), 2000, 'ready');
+      return { status: 'ok' };
+    } catch {
+      return reply.code(503).send({ status: 'unavailable' });
+    }
+  });
+
   return app;
 }
 
@@ -582,6 +664,28 @@ const invokedDirectly =
   process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   const app = buildServer();
+  const processErrorStore = createErrorStore();
+  const recordFatal = (err: unknown, kind: string) =>
+    processErrorStore
+      .recordError({
+        service: config.auth.serviceName,
+        source: 'process',
+        level: 'fatal',
+        message: err instanceof Error ? err.message : String(err),
+        errorType: kind,
+        stack: err instanceof Error ? (err.stack ?? null) : null,
+      })
+      .catch(() => {});
+
+  process.on('unhandledRejection', (reason) => {
+    app.log.error({ err: reason }, 'unhandledRejection');
+    void recordFatal(reason, 'unhandledRejection');
+  });
+  process.on('uncaughtException', (err) => {
+    app.log.error({ err }, 'uncaughtException');
+    void recordFatal(err, 'uncaughtException').finally(() => process.exit(1));
+  });
+
   app.listen({ port: config.port, host: config.host }).catch((err) => {
     app.log.error(err);
     process.exit(1);
