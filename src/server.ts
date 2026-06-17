@@ -97,7 +97,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Prometheus metrics at /metrics (http_request_duration_seconds by route/status
   // + default process/event-loop metrics). Scraped locally by Prometheus.
-  app.register(metricsPlugin, { endpoint: '/metrics' });
+  // clearRegisterOnInit: true keeps the global prom-client registry clean when
+  // buildServer() is called multiple times in tests (prevents "already registered" errors).
+  app.register(metricsPlugin, { endpoint: '/metrics', clearRegisterOnInit: true });
   const authenticator = opts.authenticator ?? defaultAuthenticator();
 
   const deps: SelectPromoDeps = {

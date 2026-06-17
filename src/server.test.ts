@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { register as promRegister } from 'prom-client';
 import type { LightMyRequestResponse } from 'fastify';
 import { buildServer } from './server';
+
+beforeEach(() => { promRegister.clear(); });
+afterEach(() => { promRegister.clear(); });
 import type { ConfigService } from './services/config-service';
 import type { CampaignService } from './services/campaign-service';
 import type { BalanceService } from './services/balance-service';
