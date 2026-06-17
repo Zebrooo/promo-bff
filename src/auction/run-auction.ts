@@ -199,30 +199,38 @@ export function allocateFeedFill(
   // Lone advertiser fills the whole feed; otherwise cap each advertiser's share.
   const advCap = distinctAdvertisers > 1 ? Math.max(1, Math.ceil(count * share)) : count;
 
-  const state = eligible.map((c) => ({ c, weight: Math.max(1, c.cpmKopecks), current: 0 }));
+  // ROUND-ROBIN: место за кругом — каждой кампании по одному, повтор ТОЛЬКО после
+  // полного круга (когда все уже показались). Порядок круга: наименее показанные
+  // этому юзеру вперёд (раунды продвигаются по просмотрам — «после того как каждая
+  // получит просмотр, разыгрываем заново»), при равенстве — выше CPM (порядок
+  // выигрыша), затем меньший id. Так одна РК не занимает первые N мест подряд —
+  // кампании чередуются; повтор — лишь когда круг пройден. Частотный кап (budgetOf)
+  // и доля рекламодателя (advCap) остаются бэкстопами.
+  const seenOf = (c: CampaignCandidate): number => opts.seenCounts?.[`campaign:${c.id}`] ?? 0;
+  const order = [...eligible].sort(
+    (a, b) =>
+      (seenOf(a) - seenOf(b)) ||
+      (Math.max(1, b.cpmKopecks) - Math.max(1, a.cpmKopecks)) ||
+      (a.id - b.id),
+  );
+
   const advUsed = new Map<string, number>();
   const usedByCampaign = new Map<number, number>();
   const out: CampaignCandidate[] = [];
-
-  for (let n = 0; n < count; n++) {
-    // A campaign stays active until it hits its advertiser's share cap OR its own
-    // per-viewer appearance budget (the frequency cap, enforced within this fill too).
-    const active = state.filter(
-      (s) =>
-        (advUsed.get(s.c.advertiserId) ?? 0) < advCap &&
-        (usedByCampaign.get(s.c.id) ?? 0) < budgetOf(s.c),
-    );
-    if (active.length === 0) break;
-    const total = active.reduce((sum, s) => sum + s.weight, 0);
-    for (const s of active) s.current += s.weight;
-    // SWRR pick: highest running current, tie-break lower id (older campaign).
-    const winner = active.reduce((best, s) =>
-      s.current > best.current || (s.current === best.current && s.c.id < best.c.id) ? s : best,
-    );
-    winner.current -= total;
-    advUsed.set(winner.c.advertiserId, (advUsed.get(winner.c.advertiserId) ?? 0) + 1);
-    usedByCampaign.set(winner.c.id, (usedByCampaign.get(winner.c.id) ?? 0) + 1);
-    out.push(winner.c);
+  // Крутим круги, пока не наберём count или пока никто не может встать (исчерпаны
+  // частотные бюджеты / доли рекламодателей) — тогда место в ленте просто пустует.
+  let placedThisRound = true;
+  while (out.length < count && placedThisRound) {
+    placedThisRound = false;
+    for (const c of order) {
+      if (out.length >= count) break;
+      if ((usedByCampaign.get(c.id) ?? 0) >= budgetOf(c)) continue;
+      if ((advUsed.get(c.advertiserId) ?? 0) >= advCap) continue;
+      out.push(c);
+      usedByCampaign.set(c.id, (usedByCampaign.get(c.id) ?? 0) + 1);
+      advUsed.set(c.advertiserId, (advUsed.get(c.advertiserId) ?? 0) + 1);
+      placedThisRound = true;
+    }
   }
   return out;
 }
