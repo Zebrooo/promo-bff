@@ -286,12 +286,38 @@ describe('allocateFeedFill', () => {
     expect(out.every((c) => c.id === 1)).toBe(true);
   });
 
-  it('higher cpm appears proportionally more often', () => {
+  it('round-robin: equal share, dearer first within each round (no CPM domination)', () => {
     const out = allocateFeedFill([feed(1, 'A', 9000), feed(2, 'A', 1000)], 10, { balances: bal('A') });
     expect(out.length).toBe(10);
     const hi = out.filter((c) => c.id === 1).length;
     const lo = out.filter((c) => c.id === 2).length;
-    expect(hi).toBeGreaterThan(lo);
+    expect(hi).toBe(lo);                    // round-robin раздаёт поровну, не пропорционально CPM
+    expect(out[0].id).toBe(1);              // внутри круга — порядок выигрыша (дороже первым)
+    expect(out[0].id).not.toBe(out[1].id);  // чередуются, не подряд
+  });
+
+  it('round-robin rotates through all campaigns before any repeats (no consecutive same)', () => {
+    const out = allocateFeedFill(
+      [feed(1, 'A', 5000), feed(2, 'B', 4000), feed(3, 'C', 3000)],
+      9,
+      { balances: bal('A', 'B', 'C') },
+    );
+    expect(out.length).toBe(9);
+    for (let i = 1; i < out.length; i++) expect(out[i].id).not.toBe(out[i - 1].id); // нет двух подряд
+    expect(out.filter((c) => c.id === 1).length).toBe(3); // 3 круга по 3 — поровну
+    expect(out.filter((c) => c.id === 2).length).toBe(3);
+    expect(out.filter((c) => c.id === 3).length).toBe(3);
+  });
+
+  it('least-viewed campaign goes first next round (rounds advance by views, not just CPM)', () => {
+    // id 1 уже показан 2× этому юзеру, id 2 — 0× → id 2 идёт первым, несмотря на меньший CPM.
+    const out = allocateFeedFill(
+      [feed(1, 'A', 9000), feed(2, 'B', 1000)],
+      4,
+      { balances: bal('A', 'B') },
+      { seenCounts: { 'campaign:1': 2 }, freqCap: 10 },
+    );
+    expect(out[0].id).toBe(2);
   });
 
   it('caps one advertiser to maxAdvertiserShare when others exist, favouring the dearer', () => {
