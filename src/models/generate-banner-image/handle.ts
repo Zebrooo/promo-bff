@@ -1,47 +1,22 @@
 /**
- * generate-banner-image: text-to-image для промо без референса.
+ * generate-banner-image: text-to-image для промо без референса. Тот же
+ * OpenrouterImageClient (Nano Banana 2); модель требует imageUrl, поэтому
+ * передаём 1×1 white placeholder + детальный текстовый промпт.
  *
- * Использует тот же OpenrouterImageClient что и /enhance-banner-image
- * (Google Nano Banana 2 / gemini-3.1-flash-image-preview). Модель требует
- * imageUrl, но с пустым 1×1 white placeholder + детальным промптом она
- * успешно генерит из текста.
- *
- * Failure envelope как у других моделей — всегда HTTP 200, status в body.
- *   - rate-limit hit → `rate_limited`
- *   - openrouter / image-fetch failure → `image_unavailable`
- *   - empty / unparseable response → `malformed_response`
- *
- * Делит rate-limit и cost-log с /enhance-promo и /enhance-banner-image —
- * advertiserId один бюджет.
+ * Тонкая обёртка над общим пайплайном (cache → rate-limit → model →
+ * webp-транскод → cost-log), см. banner-image-pipeline. Делит бюджет с
+ * /enhance-promo и /enhance-banner-image по advertiserId.
  */
-import type { OpenrouterImageClient } from '../../services/openrouter-image-client';
-import type { AiCache } from '../../services/ai-cache';
-import type { RateLimitStore } from '../../services/rate-limit-store';
-import type { CostLog } from '../../services/cost-log';
 import { canonicalCacheKey } from '../../services/ai-cache';
+import { runBannerImage, type BannerImagePipelineDeps } from '../../services/banner-image-pipeline';
 import type { GenerateBannerImageParams, GenerateBannerImageResult } from './types';
 
-export interface Logger {
-  info(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-}
+// Реэкспорт общих типов (имена сохранены для обратной совместимости).
+export type { CachedBannerImage as CachedGeneratedImage } from '../../services/banner-image-pipeline';
+export type GenerateBannerImageDeps = BannerImagePipelineDeps;
 
-export interface CachedGeneratedImage {
-  imageDataUrl: string;
-  model: string;
-}
-
-export interface GenerateBannerImageDeps {
-  openrouterImage: OpenrouterImageClient;
-  imageCache: AiCache<CachedGeneratedImage>;
-  rateLimit: RateLimitStore;
-  costLog: CostLog;
-  logger?: Logger;
-}
-
-/** 1×1 пустой белый PNG. Нужен только чтобы передать в Nano Banana
- *  обязательный imageUrl — модель не использует его как референс при
- *  явной text-to-image инструкции. */
+/** 1×1 пустой белый PNG — только чтобы передать обязательный imageUrl; при явной
+ *  text-to-image инструкции модель его не использует как референс. */
 const BLANK_PLACEHOLDER =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 
@@ -70,8 +45,6 @@ export async function handleGenerateBannerImage(
   params: GenerateBannerImageParams,
   deps: GenerateBannerImageDeps,
 ): Promise<GenerateBannerImageResult> {
-  const { openrouterImage, imageCache, rateLimit, costLog, logger } = deps;
-
   const cacheKey = canonicalCacheKey({
     kind: 'generate-banner-image',
     advertiserId: params.advertiserId,
@@ -79,43 +52,16 @@ export async function handleGenerateBannerImage(
     width: params.width,
     height: params.height,
   });
-  const cached = imageCache.get(cacheKey);
-  if (cached) {
-    return { status: 'ok', data: { imageDataUrl: cached.imageDataUrl, cacheHit: true, model: cached.model } };
-  }
-
-  const limit = rateLimit.hit(params.advertiserId);
-  if (!limit.ok) {
-    return { status: 'error', reason: 'rate_limited' };
-  }
-
-  let result;
-  try {
-    result = await openrouterImage.call({
+  return runBannerImage(
+    {
+      advertiserId: params.advertiserId,
+      cacheKey,
       prompt: PROMPT_TEMPLATE(params),
       imageUrl: BLANK_PLACEHOLDER,
-    });
-  } catch (err) {
-    logger?.error({ err }, 'generate-banner-image: openrouter call failed');
-    return { status: 'error', reason: 'image_unavailable' };
-  }
-  if (!result.imageDataUrl || !result.imageDataUrl.startsWith('data:image/')) {
-    logger?.error({}, 'generate-banner-image: model returned no image');
-    return { status: 'error', reason: 'malformed_response' };
-  }
-
-  imageCache.set(cacheKey, { imageDataUrl: result.imageDataUrl, model: result.model });
-  try {
-    await costLog.append({
-      advertiserId: params.advertiserId,
-      model: result.model,
-      tokensIn: 0,
-      tokensOut: 0,
-      costRub: result.costRub,
-    });
-  } catch (err) {
-    logger?.error({ err }, 'generate-banner-image: cost-log append failed (non-fatal)');
-  }
-
-  return { status: 'ok', data: { imageDataUrl: result.imageDataUrl, cacheHit: false, model: result.model } };
+      width: params.width,
+      height: params.height,
+      label: 'generate-banner-image',
+    },
+    deps,
+  );
 }
