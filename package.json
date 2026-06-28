@@ -16,6 +16,7 @@
     "@zebrooo/service-ticket": "^0.1.0",
     "fastify": "^5.2.0",
     "fastify-metrics": "^13.2.0",
+    "sharp": "^0.35.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {

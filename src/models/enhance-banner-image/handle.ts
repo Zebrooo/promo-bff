@@ -1,63 +1,34 @@
 /**
  * enhance-banner-image: regenerate a banner's IMAGE via Google Nano Banana 2
- * (gemini-3.1-flash-image-preview by default). The cabinet sends the texts to
- * bake, the user's reference image URL, and the target slot resolution; we
- * craft a prompt that instructs the model to render the new banner at the
- * requested width×height, using the source image as visual reference.
+ * (gemini-3.1-flash-image-preview). The cabinet sends the texts to bake, the
+ * user's reference image URL and the target slot resolution; we craft a prompt
+ * that renders the new banner at width×height using the source as reference.
  *
- * Reuses the same rate-limit-store and cost-log instances as `/enhance-promo`,
- * so a single advertiser shares a budget across both endpoints (they're both
- * AI operations on the same draft).
- *
- * Failure envelope follows the BFF convention — always HTTP 200, status in body.
- *   - rate-limit hit → `rate_limited`
- *   - openrouter / image-fetch failure → `image_unavailable`
- *   - empty / unparseable response → `malformed_response`
+ * Тонкая обёртка: строит cacheKey + промпт и делегирует общий пайплайн
+ * (cache → rate-limit → model → webp-транскод → cost-log), см. banner-image-pipeline.
+ * Делит rate-limit / cost-log с /enhance-promo — один бюджет на advertiserId.
  */
-import type { OpenrouterImageClient } from '../../services/openrouter-image-client';
-import type { AiCache } from '../../services/ai-cache';
-import type { RateLimitStore } from '../../services/rate-limit-store';
-import type { CostLog } from '../../services/cost-log';
 import { canonicalCacheKey } from '../../services/ai-cache';
+import { runBannerImage, type BannerImagePipelineDeps } from '../../services/banner-image-pipeline';
 import type { EnhanceBannerImageParams, EnhanceBannerImageResult } from './types';
 
-export interface Logger {
-  info(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-}
+// Реэкспорт общих типов — server.ts продолжает импортировать их отсюда.
+export type { CachedBannerImage } from '../../services/banner-image-pipeline';
+export type EnhanceBannerImageDeps = BannerImagePipelineDeps;
 
-/** Cache value — just enough to reconstruct the response on a hit. */
-export interface CachedBannerImage {
-  imageDataUrl: string;
-  model: string;
-}
-
-export interface EnhanceBannerImageDeps {
-  openrouterImage: OpenrouterImageClient;
-  /** Renamed from `cache` to avoid intersection-type clash with EnhanceDeps,
-   *  which has its own (text-suggestion) cache of a different generic type. */
-  imageCache: AiCache<CachedBannerImage>;
-  rateLimit: RateLimitStore;
-  costLog: CostLog;
-  logger?: Logger;
-}
-
-/** English corner names — the prompt itself is in English (image models tend
- *  to follow English instructions more precisely), but the texts the model
- *  RENDERS onto the image must stay in Russian, verbatim. */
+/** English corner names — the prompt is in English (image models follow English
+ *  more precisely), but the RENDERED texts stay Russian, verbatim. */
 const CORNER_EN: Record<string, { name: string; opposite: string }> = {
-  tl: { name: 'TOP-LEFT',     opposite: 'BOTTOM-RIGHT' },
-  tr: { name: 'TOP-RIGHT',    opposite: 'BOTTOM-LEFT'  },
-  bl: { name: 'BOTTOM-LEFT',  opposite: 'TOP-RIGHT'    },
-  br: { name: 'BOTTOM-RIGHT', opposite: 'TOP-LEFT'     },
+  tl: { name: 'TOP-LEFT', opposite: 'BOTTOM-RIGHT' },
+  tr: { name: 'TOP-RIGHT', opposite: 'BOTTOM-LEFT' },
+  bl: { name: 'BOTTOM-LEFT', opposite: 'TOP-RIGHT' },
+  br: { name: 'BOTTOM-RIGHT', opposite: 'TOP-LEFT' },
 };
 
 const PROMPT_TEMPLATE = (params: EnhanceBannerImageParams): string => {
   const { width, height, draft } = params;
   const ctaKey = params.ctaPosition && CORNER_EN[params.ctaPosition] ? params.ctaPosition : 'br';
   const corner = CORNER_EN[ctaKey];
-  // CORNER_EN хранит имена UPPERCASE ("BOTTOM-RIGHT"); промпт читается естественнее
-  // в lowercase ("bottom-right") — приводим здесь.
   const ctaCorner = corner.name.toLowerCase();
   const ctaOppositeCorner = corner.opposite.toLowerCase();
 
@@ -87,12 +58,8 @@ export async function handleEnhanceBannerImage(
   params: EnhanceBannerImageParams,
   deps: EnhanceBannerImageDeps,
 ): Promise<EnhanceBannerImageResult> {
-  const { openrouterImage, imageCache, rateLimit, costLog, logger } = deps;
-
-  // 1. Cache — keyed by (advertiserId, imageUrl, dims, draft, ctaPosition).
-  //    Same draft with a different CTA corner needs a different image (the
-  //    model is asked to leave that corner free), so the position belongs
-  //    in the key.
+  // Same draft with a different CTA corner needs a different image (the model
+  // leaves that corner free), so ctaPosition belongs in the cache key.
   const cacheKey = canonicalCacheKey({
     kind: 'enhance-banner-image',
     advertiserId: params.advertiserId,
@@ -102,49 +69,16 @@ export async function handleEnhanceBannerImage(
     draft: params.draft,
     ctaPosition: params.ctaPosition ?? 'br',
   });
-  const cached = imageCache.get(cacheKey);
-  if (cached) {
-    return { status: 'ok', data: { imageDataUrl: cached.imageDataUrl, cacheHit: true, model: cached.model } };
-  }
-
-  // 2. Rate-limit (shared with /enhance-promo for one budget per advertiser).
-  const limit = rateLimit.hit(params.advertiserId);
-  if (!limit.ok) {
-    return { status: 'error', reason: 'rate_limited' };
-  }
-
-  // 3. Call Nano Banana 2.
-  let result;
-  try {
-    result = await openrouterImage.call({
+  return runBannerImage(
+    {
+      advertiserId: params.advertiserId,
+      cacheKey,
       prompt: PROMPT_TEMPLATE(params),
       imageUrl: params.imageUrl,
-    });
-  } catch (err) {
-    logger?.error({ err }, 'enhance-banner-image: openrouter call failed');
-    return { status: 'error', reason: 'image_unavailable' };
-  }
-  if (!result.imageDataUrl || !result.imageDataUrl.startsWith('data:image/')) {
-    logger?.error({}, 'enhance-banner-image: model returned no image');
-    return { status: 'error', reason: 'malformed_response' };
-  }
-
-  // 4. Cache + cost log (best-effort).
-  imageCache.set(cacheKey, { imageDataUrl: result.imageDataUrl, model: result.model });
-  try {
-    await costLog.append({
-      advertiserId: params.advertiserId,
-      model: result.model,
-      tokensIn: 0,
-      tokensOut: 0,
-      costRub: result.costRub,
-    });
-  } catch (err) {
-    logger?.error({ err }, 'enhance-banner-image: cost-log append failed (best-effort)');
-  }
-
-  return {
-    status: 'ok',
-    data: { imageDataUrl: result.imageDataUrl, cacheHit: false, model: result.model },
-  };
+      width: params.width,
+      height: params.height,
+      label: 'enhance-banner-image',
+    },
+    deps,
+  );
 }
