@@ -286,17 +286,18 @@ describe('allocateFeedFill', () => {
     expect(out.every((c) => c.id === 1)).toBe(true);
   });
 
-  it('round-robin: equal share, dearer first within each round (no CPM domination)', () => {
+  it('Вариант D: bounded premium — dearer wins MORE, but base stays shared (not full domination)', () => {
     const out = allocateFeedFill([feed(1, 'A', 9000), feed(2, 'A', 1000)], 10, { balances: bal('A') });
     expect(out.length).toBe(10);
     const hi = out.filter((c) => c.id === 1).length;
     const lo = out.filter((c) => c.id === 2).length;
-    expect(hi).toBe(lo);                    // round-robin раздаёт поровну, не пропорционально CPM
-    expect(out[0].id).toBe(1);              // внутри круга — порядок выигрыша (дороже первым)
+    expect(hi).toBeGreaterThan(lo);         // премиум за верхнее место → дороже показывается чаще
+    expect(lo).toBeGreaterThan(0);          // но база остаётся — нижний всё равно крутится
+    expect(out[0].id).toBe(1);              // дороже первым
     expect(out[0].id).not.toBe(out[1].id);  // чередуются, не подряд
   });
 
-  it('round-robin rotates through all campaigns before any repeats (no consecutive same)', () => {
+  it('interleaves without consecutive repeats; dearer gets more (bounded premium)', () => {
     const out = allocateFeedFill(
       [feed(1, 'A', 5000), feed(2, 'B', 4000), feed(3, 'C', 3000)],
       9,
@@ -304,9 +305,12 @@ describe('allocateFeedFill', () => {
     );
     expect(out.length).toBe(9);
     for (let i = 1; i < out.length; i++) expect(out[i].id).not.toBe(out[i - 1].id); // нет двух подряд
-    expect(out.filter((c) => c.id === 1).length).toBe(3); // 3 круга по 3 — поровну
-    expect(out.filter((c) => c.id === 2).length).toBe(3);
-    expect(out.filter((c) => c.id === 3).length).toBe(3);
+    const c1 = out.filter((c) => c.id === 1).length;
+    const c2 = out.filter((c) => c.id === 2).length;
+    const c3 = out.filter((c) => c.id === 3).length;
+    expect(c1).toBeGreaterThanOrEqual(c2); // дороже — чаще
+    expect(c2).toBeGreaterThanOrEqual(c3);
+    expect(c3).toBeGreaterThan(0);         // нижний всё равно крутится
   });
 
   it('least-viewed campaign goes first next round (rounds advance by views, not just CPM)', () => {
