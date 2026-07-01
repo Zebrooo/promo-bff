@@ -101,6 +101,18 @@ describe('loadSuppliers', () => {
     expect(deps.listingService.getListingStats).toHaveBeenCalledTimes(1);
   });
 
+  it('does not serve guest defaults to an authenticated request within the TTL (cache keyed by auth)', async () => {
+    const deps = makeDeps();
+    // Same userId hits as a guest first — the cache stores neutral defaults…
+    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', authenticated: false }, deps);
+    vi.advanceTimersByTime(1000);
+    // …then logs in within the TTL: the authenticated request must load the
+    // real profile + subscription, not the cached guest entry.
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', authenticated: true }, deps);
+    expect(deps.userService.getUserProfile).toHaveBeenCalledTimes(1);
+    expect(data.userData).toMatchObject({ region: 'ru', subscriptionLevel: 'plus' });
+  });
+
   it('does not query listings for anonymous users (buyer by default)', async () => {
     const deps = makeDeps();
     const data = await loadSuppliers([new NeedsListingStats() as Checker<SupplierId>], { userId: 'anon', authenticated: false }, deps);
