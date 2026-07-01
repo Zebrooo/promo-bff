@@ -15,7 +15,12 @@ import type { Promo } from '../promo-selector/types';
 import { config } from '../config';
 import { withTimeout } from '../util/with-timeout';
 import { promosKey, queueKey, getS3Client, isNoSuchKey } from './s3-client';
-import { poolSchema, queueObjectSchema } from './catalogue-schema';
+import { parsePoolLeniently, queueObjectSchema } from './catalogue-schema';
+
+/** Minimal logger shape (Fastify's logger satisfies it; tests may pass nothing). */
+export interface ConfigLogger {
+  warn(obj: unknown, msg?: string): void;
+}
 
 async function readObject(key: string): Promise<string | null> {
   try {
@@ -28,12 +33,21 @@ async function readObject(key: string): Promise<string | null> {
   }
 }
 
-async function fetchQueue(queueName: string): Promise<{ promos: Promo[]; persist: boolean }> {
+async function fetchQueue(queueName: string, logger?: ConfigLogger): Promise<{ promos: Promo[]; persist: boolean }> {
   const [poolText, queueText] = await Promise.all([
     readObject(promosKey()),
     readObject(queueKey(queueName)),
   ]);
-  const pool = poolText === null ? [] : poolSchema.parse(JSON.parse(poolText));
+  // Per-item validation: a single corrupt promo is dropped (and logged), it
+  // must not dark every slot on the site. Non-array pool JSON still throws.
+  let pool: Promo[] = [];
+  if (poolText !== null) {
+    const { promos: valid, rejected } = parsePoolLeniently(JSON.parse(poolText));
+    for (const r of rejected) {
+      logger?.warn({ promoId: r.promoId, issues: r.issues }, 'config: invalid promo dropped from pool');
+    }
+    pool = valid;
+  }
   const queueObj =
     queueText === null
       ? { persist: false, ids: [] as string[] }
@@ -60,7 +74,7 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-export function createConfigService(): ConfigService {
+export function createConfigService(logger?: ConfigLogger): ConfigService {
   const ms = config.serviceTimeouts.configServiceMs;
   // Per-instance cache. buildServer() constructs exactly one ConfigService for
   // the server's lifetime, so in prod this is effectively process-wide; in tests
@@ -75,11 +89,11 @@ export function createConfigService(): ConfigService {
         const nowMs = Date.now();
         const hit = cache.get(queueName);
         if (hit && hit.expiresAt > nowMs) return hit.value;
-        const value = await withTimeout(fetchQueue(queueName), ms, 'configService.getQueue');
+        const value = await withTimeout(fetchQueue(queueName, logger), ms, 'configService.getQueue');
         cache.set(queueName, { value, expiresAt: nowMs + CATALOGUE_CACHE_TTL_MS });
         return value;
       }
-      return withTimeout(fetchQueue(queueName), ms, 'configService.getQueue');
+      return withTimeout(fetchQueue(queueName, logger), ms, 'configService.getQueue');
     },
   };
 }

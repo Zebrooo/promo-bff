@@ -105,7 +105,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const authenticator = opts.authenticator ?? defaultAuthenticator();
 
   const deps: SelectPromoDeps = {
-    configService: createConfigService(),
+    configService: createConfigService(app.log),
     userService: createUserService(),
     billingService: createBillingService(),
     impressionStore: createImpressionStore(),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { catalogueSchema, promoSchema, queueSchema } from './catalogue-schema';
+import { catalogueSchema, promoFormatSchema, promoSchema, queueSchema } from './catalogue-schema';
+import type { PromoFormat } from '../promo-selector/types';
 import { makePromo } from '../test-utils';
 
 describe('promoSchema', () => {
@@ -58,5 +59,36 @@ describe('queueSchema', () => {
   it('queueSchema accepts an array of id strings', () => {
     expect(() => queueSchema.parse(['a', 'b'])).not.toThrow();
     expect(() => queueSchema.parse([1, 2])).toThrow();
+  });
+});
+
+/**
+ * Runtime mirror of the PromoFormat union. Two compile-time guards keep it
+ * honest: `satisfies` rejects typos/extras, and AssertExhaustive fails tsc if
+ * the union gains a literal that is missing from this list.
+ */
+const ALL_PROMO_FORMATS = [
+  'inline',
+  'popup',
+  'fullscreen',
+  'topline',
+  'banner',
+  'divkit',
+  'tooltip',
+] as const satisfies readonly PromoFormat[];
+
+type MissingFromList = Exclude<PromoFormat, (typeof ALL_PROMO_FORMATS)[number]>;
+type AssertExhaustive = [MissingFromList] extends [never] ? true : { missingLiterals: MissingFromList };
+const _assertExhaustive: AssertExhaustive = true;
+void _assertExhaustive;
+
+describe('promoFormatSchema ↔ PromoFormat enum sync', () => {
+  it("accepts every PromoFormat literal except the auction-only 'banner'", () => {
+    // Contract: queue promos may use any domain format EXCEPT 'banner' — that
+    // one is the paid auction creative, never served from the S3 queues. If
+    // either side drifts (a format added to types.ts but not the schema, or
+    // vice versa), this comparison fails.
+    const queueFormats = ALL_PROMO_FORMATS.filter((f) => f !== 'banner');
+    expect([...promoFormatSchema.options].sort()).toEqual([...queueFormats].sort());
   });
 });

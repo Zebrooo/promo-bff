@@ -80,4 +80,17 @@ describe('configService.getQueue', () => {
     putQueue('home', { persist: false, ids: ['a'] });
     await expect(createConfigService().getQueue('home')).rejects.toThrow();
   });
+
+  it('drops a single invalid pool record, keeps the valid ones, and warns', async () => {
+    // One corrupt promo must not dark every slot on the site: per-item
+    // validation drops (and logs) the broken record instead of failing the pool.
+    putPool([makePromo({ id: 'a' }), { id: 'broken', format: 'nope' }, makePromo({ id: 'b' })]);
+    putQueue('home', { persist: false, ids: ['a', 'broken', 'b'] });
+    const warns: { obj: unknown; msg?: string }[] = [];
+    const logger = { warn: (obj: unknown, msg?: string) => warns.push({ obj, msg }) };
+    const result = await createConfigService(logger).getQueue('home');
+    expect(result.promos.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(warns.length).toBe(1);
+    expect(warns[0].obj).toMatchObject({ promoId: 'broken' });
+  });
 });
