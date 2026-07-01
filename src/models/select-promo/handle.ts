@@ -78,6 +78,13 @@ export async function handleSelectPromo(
   }
 
   if (!promo) {
+    // Same client answer either way (reason kept stable for consumers), but the
+    // logs must tell "the queue had nothing to offer" (empty — or missing in
+    // S3, which config-service warns about separately) apart from "checkers
+    // filtered every candidate" (2026-05-31 incident mechanics).
+    if (promos.length === 0) {
+      logger?.info({ queue: queueName }, 'select-promo: queue resolved to zero promos');
+    }
     return { status: 'skipped', reason: 'no_promo' };
   }
 

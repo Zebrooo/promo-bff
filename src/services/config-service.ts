@@ -50,11 +50,17 @@ interface QueueObject {
   ids: string[];
 }
 
-async function fetchQueueObject(queueName: string): Promise<QueueObject> {
+async function fetchQueueObject(queueName: string, logger?: ConfigLogger): Promise<QueueObject> {
   const queueText = await readObject(queueKey(queueName));
-  return queueText === null
-    ? { persist: false, ids: [] }
-    : queueObjectSchema.parse(JSON.parse(queueText));
+  if (queueText === null) {
+    // Distinguish "the object was never written / was deleted" from a
+    // legitimately EMPTY queue (ids: []) — in the 2026-05-31 incident the two
+    // were indistinguishable and the dark slot went unnoticed. The response to
+    // the client stays the same (empty queue); only the log differs.
+    logger?.warn({ queue: queueName }, 'queue object missing in S3');
+    return { persist: false, ids: [] };
+  }
+  return queueObjectSchema.parse(JSON.parse(queueText));
 }
 
 export interface ConfigService {
@@ -102,7 +108,7 @@ export function createConfigService(logger?: ConfigLogger): ConfigService {
       const [pool, queueObj] = await withTimeout(
         Promise.all([
           cachedLoad('pool', () => fetchPool(logger)),
-          cachedLoad(`queue:${queueName}`, () => fetchQueueObject(queueName)),
+          cachedLoad(`queue:${queueName}`, () => fetchQueueObject(queueName, logger)),
         ]),
         ms,
         'configService.getQueue',

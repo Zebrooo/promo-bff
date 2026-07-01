@@ -70,6 +70,26 @@ describe('handleSelectPromo', () => {
     expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
   });
 
+  it('logs "queue resolved to zero promos" only when the queue was empty (≠ checkers filtered)', async () => {
+    const infos: { obj: unknown; msg?: string }[] = [];
+    const logger = {
+      info: (obj: unknown, msg?: string) => infos.push({ obj, msg }),
+      error: () => {},
+    };
+
+    const emptyQueue = fakeConfigService({ getQueue: async () => ({ promos: [], persist: false }) });
+    await handleSelectPromo({ userId: 'u1', queue: 'home' }, deps({ configService: emptyQueue, logger }));
+    expect(infos).toEqual([{ obj: { queue: 'home' }, msg: 'select-promo: queue resolved to zero promos' }]);
+
+    infos.length = 0;
+    const allFiltered = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ endsAt: '2000-01-01T00:00:00.000Z' })], persist: false }),
+    });
+    const result = await handleSelectPromo({ userId: 'u1', queue: 'home' }, deps({ configService: allFiltered, logger }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+    expect(infos).toEqual([]);
+  });
+
   it('returns status "error" when the config service is down', async () => {
     const configService = fakeConfigService({
       getQueue: async () => { throw new Error('bunker unreachable'); },

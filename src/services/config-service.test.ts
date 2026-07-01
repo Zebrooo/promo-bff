@@ -75,6 +75,26 @@ describe('configService.getQueue', () => {
     expect(result).toEqual({ promos: [], persist: false });
   });
 
+  it('warns "queue object missing in S3" for a missing queue object (≠ empty queue)', async () => {
+    // Incident 2026-05-31: a missing queue-<name>.json looked exactly like an
+    // empty queue in the logs. The response stays the same; the log must differ.
+    putPool([makePromo({ id: 'a' })]);
+    const warns: { obj: unknown; msg?: string }[] = [];
+    const logger = { warn: (obj: unknown, msg?: string) => warns.push({ obj, msg }) };
+    const svc = createConfigService(logger);
+
+    const missing = await svc.getQueue('home');
+    expect(missing).toEqual({ promos: [], persist: false });
+    expect(warns).toEqual([{ obj: { queue: 'home' }, msg: 'queue object missing in S3' }]);
+
+    // An EMPTY queue object (ids: []) is a legitimate state — no warn.
+    warns.length = 0;
+    putQueue('news', { persist: false, ids: [] });
+    const empty = await svc.getQueue('news');
+    expect(empty).toEqual({ promos: [], persist: false });
+    expect(warns).toEqual([]);
+  });
+
   it('throws on malformed pool JSON', async () => {
     put(promosKey(), '{not json');
     putQueue('home', { persist: false, ids: ['a'] });
