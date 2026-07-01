@@ -45,4 +45,24 @@ describe('createChargeService.recordCampaignImpression', () => {
     mockFetch(500);
     await expect(createChargeService(cfg).recordCampaignImpression(7, 'u1')).rejects.toThrow(/HTTP 500/);
   });
+
+  it('aborts the fetch signal when the timeout fires (prevents double-charge on slow RPC)', async () => {
+    // This proves Bug 1 is fixed: the fetch is called with an AbortSignal, and that
+    // signal becomes aborted when the withTimeout deadline fires. Without the fix,
+    // a slow-but-successful Supabase RPC would complete after the 502 response is
+    // sent, causing the storefront to retry → two charges for one impression.
+    let capturedSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      // Simulate a slow Supabase response that arrives AFTER the BFF timeout.
+      await new Promise<never>(() => {}); // never resolves
+    }));
+    const shortTimeout = { ...cfg, timeoutMs: 20 };
+    await expect(
+      createChargeService(shortTimeout).recordCampaignImpression(7, 'u1'),
+    ).rejects.toBeInstanceOf(Error); // TimeoutError
+    // The key assertion: the fetch was given a signal and it was aborted.
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(true);
+  });
 });

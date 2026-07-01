@@ -30,17 +30,32 @@ export function createChargeService(cfg: SupabaseConfig = config.supabase): Char
   }
   const rpc = `${url}/rest/v1/rpc/record_campaign_impression`;
 
-  async function recordCampaignImpression(campaignId: number, userId: string): Promise<void> {
+  async function recordCampaignImpression(
+    campaignId: number,
+    userId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // signal is wired to the AbortController passed into withTimeout; if the BFF
+    // deadline fires, the in-flight Supabase HTTP request is cancelled here,
+    // preventing the slow-RPC double-charge (Bug 1 fix).
     const res = await fetch(rpc, {
       method: 'POST',
       headers: { ...authHeaders(serviceRoleKey), 'content-type': 'application/json' },
       body: JSON.stringify({ p_campaign_id: campaignId, p_user_id: userId }),
+      signal,
     });
     if (!res.ok) throw new Error(`charge-service write failed: HTTP ${res.status}`);
   }
 
   return {
-    recordCampaignImpression: (campaignId, userId) =>
-      withTimeout(recordCampaignImpression(campaignId, userId), timeoutMs, 'chargeService.recordCampaignImpression'),
+    recordCampaignImpression: (campaignId, userId) => {
+      const controller = new AbortController();
+      return withTimeout(
+        recordCampaignImpression(campaignId, userId, controller.signal),
+        timeoutMs,
+        'chargeService.recordCampaignImpression',
+        controller,
+      );
+    },
   };
 }

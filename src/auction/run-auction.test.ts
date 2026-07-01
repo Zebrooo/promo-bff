@@ -185,6 +185,57 @@ describe('budgetCheck', () => {
     expect(budgetCheck.isEligible({ id: 2, advertiserId: 'a', cpmKopecks: 1, creative: {}, spentKopecks: 20, totalBudgetKopecks: 20, targetPages: null, bannerFormat: null }, ctx)).toBe(false);
     expect(budgetCheck.isEligible({ id: 3, advertiserId: 'a', cpmKopecks: 1, creative: {}, spentKopecks: 99, totalBudgetKopecks: null, targetPages: null, bannerFormat: null }, ctx)).toBe(true);
   });
+
+  // Bug 4 boundary tests — overspend-by-one-CPM.
+  //
+  // Old check: spentKopecks < totalBudgetKopecks
+  //   → a campaign at totalBudget-1 still wins and is charged a full CPM,
+  //     ending up at totalBudget-1+cpm > totalBudget (overspend).
+  //
+  // New check: spentKopecks + cpmKopecks <= totalBudgetKopecks
+  //   → a campaign can only win when there is at least one full CPM remaining.
+  it('excludes a campaign when the next CPM charge would exceed the budget (Bug 4)', () => {
+    const ctx = { balances: new Map<string, number>() };
+    // spent=9500, cpm=1000, budget=10000 → 9500+1000=10500 > 10000 → EXCLUDE
+    expect(budgetCheck.isEligible(
+      { id: 1, advertiserId: 'a', cpmKopecks: 1000, creative: {}, spentKopecks: 9500, totalBudgetKopecks: 10_000, targetPages: null, bannerFormat: null },
+      ctx,
+    )).toBe(false);
+  });
+
+  it('includes a campaign when spent + cpm == budget exactly (full CPM fits)', () => {
+    const ctx = { balances: new Map<string, number>() };
+    // spent=9000, cpm=1000, budget=10000 → 9000+1000=10000 <= 10000 → INCLUDE
+    expect(budgetCheck.isEligible(
+      { id: 2, advertiserId: 'a', cpmKopecks: 1000, creative: {}, spentKopecks: 9000, totalBudgetKopecks: 10_000, targetPages: null, bannerFormat: null },
+      ctx,
+    )).toBe(true);
+  });
+
+  it('excludes at exactly totalBudget (spent == budget, nothing left)', () => {
+    const ctx = { balances: new Map<string, number>() };
+    // spent=10000, cpm=1000, budget=10000 → already exhausted → EXCLUDE
+    expect(budgetCheck.isEligible(
+      { id: 3, advertiserId: 'a', cpmKopecks: 1000, creative: {}, spentKopecks: 10_000, totalBudgetKopecks: 10_000, targetPages: null, bannerFormat: null },
+      ctx,
+    )).toBe(false);
+  });
+
+  it('runAuction excludes a campaign one CPM short of its budget (boundary)', () => {
+    // The failing scenario from the audit: campaign bids 1000 kopecks and has
+    // totalBudget=10000. Once spent=9500 it must be excluded — there is no
+    // full 1000-kopeck CPM left within budget. The old check (spent < budget)
+    // let it through, overcharging the advertiser by 500 kopecks.
+    const balances = new Map([['a', 100_000], ['b', 100_000]]);
+    const winner = runAuction(
+      [
+        budgeted(1, 'a', 1000, 9500, 10_000), // one CPM away — MUST be excluded (Bug 4)
+        budgeted(2, 'b', 500,  0,    20_000), // lower cpm but has room → wins instead
+      ],
+      { balances },
+    );
+    expect(winner?.id).toBe(2);
+  });
 });
 
 describe('pageTargetCheck', () => {

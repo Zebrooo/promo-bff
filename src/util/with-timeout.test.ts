@@ -27,4 +27,27 @@ describe('withTimeout', () => {
     const failing = Promise.reject(new Error('boom'));
     await expect(withTimeout(failing, 100, 'op')).rejects.toThrow('boom');
   });
+
+  it('aborts the supplied AbortController signal when the timer fires', async () => {
+    // The caller creates an AbortController and passes its signal into fetch
+    // (or any abortable operation). withTimeout must call controller.abort() on
+    // timeout so the underlying request is cancelled — preventing the
+    // slow-but-successful Supabase RPC double-charge scenario.
+    const controller = new AbortController();
+    const never = new Promise<never>(() => {}); // never settles on its own
+    await expect(withTimeout(never, 10, 'abort-test', controller)).rejects.toBeInstanceOf(TimeoutError);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it('does NOT abort the controller when the promise resolves before the timeout', async () => {
+    const controller = new AbortController();
+    await withTimeout(Promise.resolve('ok'), 100, 'fast', controller);
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it('back-compat: works without an AbortController (existing callers unaffected)', async () => {
+    // All the original callers (billing-service, config-service, etc.) pass no controller.
+    const result = await withTimeout(delay(5, 'val'), 100, 'no-ctrl');
+    expect(result).toBe('val');
+  });
 });
