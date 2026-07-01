@@ -57,6 +57,30 @@ describe('validateParams', () => {
     expect(validateParams({ userId: 'u1', skipCheckers: [1, 2] }).ok).toBe(false);
   });
 
+  it('rejects an unknown checker name in skipCheckers, listing the allowed names', () => {
+    const result = validateParams({ userId: 'u1', skipCheckers: ['nonexistent'] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('nonexistent');
+      // The error must enumerate the registered checker names (single source of truth).
+      expect(result.error).toContain('limit');
+      expect(result.error).toContain('cooldown');
+      expect(result.error).toContain('format');
+    }
+  });
+
+  it('rejects a non-boolean user.authenticated', () => {
+    const result = validateParams({ userId: 'u1', user: { authenticated: 'false' } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/authenticated must be a boolean/);
+    expect(validateParams({ userId: 'u1', user: { authenticated: 1 } }).ok).toBe(false);
+  });
+
+  it('accepts user.authenticated when boolean or absent', () => {
+    expect(validateParams({ userId: 'u1', user: { authenticated: false } }).ok).toBe(true);
+    expect(validateParams({ userId: 'u1', user: { id: 'u1' } }).ok).toBe(true);
+  });
+
   it('accepts a valid formats array', () => {
     const result = validateParams({ userId: 'u1', formats: ['popup', 'fullscreen'] });
     expect(result.ok).toBe(true);
