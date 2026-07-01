@@ -33,28 +33,28 @@ async function readObject(key: string): Promise<string | null> {
   }
 }
 
-async function fetchQueue(queueName: string, logger?: ConfigLogger): Promise<{ promos: Promo[]; persist: boolean }> {
-  const [poolText, queueText] = await Promise.all([
-    readObject(promosKey()),
-    readObject(queueKey(queueName)),
-  ]);
+async function fetchPool(logger?: ConfigLogger): Promise<Promo[]> {
+  const poolText = await readObject(promosKey());
+  if (poolText === null) return [];
   // Per-item validation: a single corrupt promo is dropped (and logged), it
   // must not dark every slot on the site. Non-array pool JSON still throws.
-  let pool: Promo[] = [];
-  if (poolText !== null) {
-    const { promos: valid, rejected } = parsePoolLeniently(JSON.parse(poolText));
-    for (const r of rejected) {
-      logger?.warn({ promoId: r.promoId, issues: r.issues }, 'config: invalid promo dropped from pool');
-    }
-    pool = valid;
+  const { promos, rejected } = parsePoolLeniently(JSON.parse(poolText));
+  for (const r of rejected) {
+    logger?.warn({ promoId: r.promoId, issues: r.issues }, 'config: invalid promo dropped from pool');
   }
-  const queueObj =
-    queueText === null
-      ? { persist: false, ids: [] as string[] }
-      : queueObjectSchema.parse(JSON.parse(queueText));
-  const byId = new Map(pool.map((p) => [p.id, p]));
-  const promos = queueObj.ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p !== undefined);
-  return { promos, persist: queueObj.persist };
+  return promos;
+}
+
+interface QueueObject {
+  persist: boolean;
+  ids: string[];
+}
+
+async function fetchQueueObject(queueName: string): Promise<QueueObject> {
+  const queueText = await readObject(queueKey(queueName));
+  return queueText === null
+    ? { persist: false, ids: [] }
+    : queueObjectSchema.parse(JSON.parse(queueText));
 }
 
 export interface ConfigService {
@@ -69,8 +69,8 @@ export interface ConfigService {
  */
 const CATALOGUE_CACHE_TTL_MS = Number(process.env.CATALOGUE_CACHE_TTL_MS ?? 15_000);
 
-interface CacheEntry {
-  value: { promos: Promo[]; persist: boolean };
+interface CacheEntry<T> {
+  value: T;
   expiresAt: number;
 }
 
@@ -79,21 +79,37 @@ export function createConfigService(logger?: ConfigLogger): ConfigService {
   // Per-instance cache. buildServer() constructs exactly one ConfigService for
   // the server's lifetime, so in prod this is effectively process-wide; in tests
   // each createConfigService() gets its own empty cache, keeping cases isolated.
-  // The cached value is treated read-only downstream (select-promo copies fields
-  // off each promo, never mutates the array), so sharing the reference is safe.
-  const cache = new Map<string, CacheEntry>();
+  // The pool (the heavy object) is cached ONCE under 'pool' and shared by every
+  // queue; each queue entry ('queue:<name>') holds only the tiny queue object.
+  // With N per-catalog queues that is 1+N S3 GETs per TTL window instead of 2N.
+  // The cached values are treated read-only downstream (select-promo copies
+  // fields off each promo, never mutates), so sharing references is safe.
+  const cache = new Map<string, CacheEntry<unknown>>();
+
+  const cachedLoad = async <T>(key: string, load: () => Promise<T>): Promise<T> => {
+    if (CATALOGUE_CACHE_TTL_MS <= 0) return load();
+    const nowMs = Date.now();
+    const hit = cache.get(key);
+    if (hit && hit.expiresAt > nowMs) return hit.value as T;
+    const value = await load();
+    // Only successful loads are cached; a throw propagates and is never stored.
+    cache.set(key, { value, expiresAt: nowMs + CATALOGUE_CACHE_TTL_MS });
+    return value;
+  };
 
   return {
     getQueue: async (queueName) => {
-      if (CATALOGUE_CACHE_TTL_MS > 0) {
-        const nowMs = Date.now();
-        const hit = cache.get(queueName);
-        if (hit && hit.expiresAt > nowMs) return hit.value;
-        const value = await withTimeout(fetchQueue(queueName, logger), ms, 'configService.getQueue');
-        cache.set(queueName, { value, expiresAt: nowMs + CATALOGUE_CACHE_TTL_MS });
-        return value;
-      }
-      return withTimeout(fetchQueue(queueName, logger), ms, 'configService.getQueue');
+      const [pool, queueObj] = await withTimeout(
+        Promise.all([
+          cachedLoad('pool', () => fetchPool(logger)),
+          cachedLoad(`queue:${queueName}`, () => fetchQueueObject(queueName)),
+        ]),
+        ms,
+        'configService.getQueue',
+      );
+      const byId = new Map(pool.map((p) => [p.id, p]));
+      const promos = queueObj.ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p !== undefined);
+      return { promos, persist: queueObj.persist };
     },
   };
 }

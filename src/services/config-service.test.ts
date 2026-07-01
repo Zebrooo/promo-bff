@@ -81,6 +81,19 @@ describe('configService.getQueue', () => {
     await expect(createConfigService().getQueue('home')).rejects.toThrow();
   });
 
+  it('fetches the pool once for two different queues within the TTL (shared pool cache)', async () => {
+    putPool([makePromo({ id: 'a' })]);
+    putQueue('home', { persist: false, ids: ['a'] });
+    putQueue('news', { persist: false, ids: ['a'] });
+    const svc = createConfigService();
+    expect((await svc.getQueue('home')).promos.map((p) => p.id)).toEqual(['a']);
+    expect((await svc.getQueue('news')).promos.map((p) => p.id)).toEqual(['a']);
+    const poolGets = s3Mock
+      .commandCalls(GetObjectCommand)
+      .filter((c) => c.args[0].input.Key === promosKey());
+    expect(poolGets.length).toBe(1);
+  });
+
   it('drops a single invalid pool record, keeps the valid ones, and warns', async () => {
     // One corrupt promo must not dark every slot on the site: per-item
     // validation drops (and logs) the broken record instead of failing the pool.
