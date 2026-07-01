@@ -53,6 +53,18 @@ export function validateParams(params: unknown): ValidationResult {
     result.skipCheckers = p.skipCheckers as string[];
   }
 
+  if (p.formats !== undefined) {
+    if (
+      !Array.isArray(p.formats) ||
+      p.formats.some((s) => typeof s !== 'string')
+    ) {
+      return { ok: false, error: 'params.formats must be an array of strings' };
+    }
+    // Drop empties/whitespace so a stray '' can't exclude every promo.
+    const formats = (p.formats as string[]).map((s) => s.trim()).filter((s) => s !== '');
+    if (formats.length > 0) result.formats = formats;
+  }
+
   if (p.device !== undefined) {
     if (p.device !== 'desktop' && p.device !== 'touch') {
       return { ok: false, error: "params.device must be 'desktop' or 'touch'" };

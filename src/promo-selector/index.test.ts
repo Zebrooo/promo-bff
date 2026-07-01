@@ -66,6 +66,26 @@ describe('selectPromo', () => {
     expect(result?.id).toBe('top');
   });
 
+  it('format filter picks the requested surface format from a mixed-format queue', async () => {
+    __clearUserDataCache();
+    // A per-catalog queue holding a topline banner then an overlay popup.
+    const promos = [makePromo({ id: 'top', format: 'topline' }), makePromo({ id: 'pop', format: 'popup' })];
+    // Overlay surface asks only for popup/fullscreen → skips the topline head.
+    const overlay = await selectPromo(promos, { ...ctx, formats: ['popup', 'fullscreen'] }, { deps: makeDeps() });
+    expect(overlay?.id).toBe('pop');
+    // Topline surface asks only for topline → gets the banner.
+    __clearUserDataCache();
+    const topline = await selectPromo(promos, { ...ctx, formats: ['topline'] }, { deps: makeDeps() });
+    expect(topline?.id).toBe('top');
+  });
+
+  it('no formats filter keeps queue order (back-compat)', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'top', format: 'topline' }), makePromo({ id: 'pop', format: 'popup' })];
+    const result = await selectPromo(promos, ctx, { deps: makeDeps() });
+    expect(result?.id).toBe('top');
+  });
+
   it('does not load suppliers when only context-only checkers are active', async () => {
     __clearUserDataCache();
     const deps = makeDeps();

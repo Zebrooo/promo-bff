@@ -57,6 +57,26 @@ describe('validateParams', () => {
     expect(validateParams({ userId: 'u1', skipCheckers: [1, 2] }).ok).toBe(false);
   });
 
+  it('accepts a valid formats array', () => {
+    const result = validateParams({ userId: 'u1', formats: ['popup', 'fullscreen'] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.formats).toEqual(['popup', 'fullscreen']);
+  });
+
+  it('rejects formats that is not an array of strings', () => {
+    expect(validateParams({ userId: 'u1', formats: 'popup' }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', formats: [1, 2] }).ok).toBe(false);
+  });
+
+  it('trims formats and omits the field when only empties remain', () => {
+    const result = validateParams({ userId: 'u1', formats: ['  topline ', '', '   '] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.formats).toEqual(['topline']);
+    const empty = validateParams({ userId: 'u1', formats: ['', '  '] });
+    expect(empty.ok).toBe(true);
+    if (empty.ok) expect(empty.params.formats).toBeUndefined();
+  });
+
   it('accepts a user object', () => {
     const result = validateParams({ userId: 'u1', user: { authenticated: true } });
     expect(result.ok).toBe(true);

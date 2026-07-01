@@ -12,6 +12,14 @@ export interface CheckContext {
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
   device?: 'desktop' | 'touch';
+  /**
+   * Acceptable creative formats for the requesting surface (e.g. ['topline'] for
+   * the top banner, ['popup','fullscreen','inline','divkit'] for the overlay).
+   * Lets one per-catalog queue hold mixed formats while each surface pulls only
+   * the format(s) it can render. Undefined/empty = no format filter (back-compat:
+   * surface separation stayed at the queue level).
+   */
+  formats?: string[];
 }
 
 /** All known supplier ids. */
