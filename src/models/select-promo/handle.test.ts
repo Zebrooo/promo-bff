@@ -219,6 +219,19 @@ describe('handleSelectPromo', () => {
     expect(noContext.status).toBe('skipped');
   });
 
+  it('params.formats narrows the queue to matching formats; omitted = head of queue', async () => {
+    // One per-catalog queue serving two surfaces: topline banner first, popup after.
+    const topline = makePromo({ id: 'top-1', format: 'topline' });
+    const popup = makePromo({ id: 'pop-1', format: 'popup' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [topline, popup], persist: false }) });
+
+    const overlay = await handleSelectPromo({ userId: 'fmt-1', formats: ['popup'] }, deps({ configService }));
+    expect(overlay).toMatchObject({ status: 'ok', data: { id: 'pop-1', format: 'popup' } });
+
+    const noFilter = await handleSelectPromo({ userId: 'fmt-2' }, deps({ configService }));
+    expect(noFilter).toMatchObject({ status: 'ok', data: { id: 'top-1', format: 'topline' } });
+  });
+
   it('seller gate: shows a seller promo only to users with active listings', async () => {
     const promo = makePromo({ id: 'seller-only', sellerStatus: 'seller' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
