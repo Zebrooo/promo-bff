@@ -53,4 +53,19 @@ describe('createBalanceService.getBalances', () => {
     mockFetch(500, {});
     await expect(createBalanceService(cfg).getBalances(['adv-1'])).rejects.toThrow(/HTTP 500/);
   });
+
+  it('coerces string-valued balance_kopecks from PostgREST to numbers (Bug 3)', async () => {
+    // PostgREST serialises bigint/numeric columns as JSON strings to avoid JS
+    // precision loss. Without Number() coercion the map holds string values and
+    // all downstream arithmetic (solvency check, budget comparisons) is broken.
+    mockFetch(200, [
+      { owner_user_id: 'adv-1', balance_kopecks: '5000' },  // string from PostgREST
+      { owner_user_id: 'adv-2', balance_kopecks: '0' },
+    ]);
+    const out = await createBalanceService(cfg).getBalances(['adv-1', 'adv-2']);
+    expect(typeof out.get('adv-1')).toBe('number');
+    expect(out.get('adv-1')).toBe(5000);
+    expect(typeof out.get('adv-2')).toBe('number');
+    expect(out.get('adv-2')).toBe(0);
+  });
 });

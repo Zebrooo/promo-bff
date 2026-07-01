@@ -162,6 +162,31 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   const chargeService: ChargeService = opts.deps?.chargeService ?? createChargeService();
 
+  // Bug 2 fix — in-process idempotency dedup for campaign charges.
+  //
+  // Problem: /impressions has no dedup key, so a network retry after a 502 (or a
+  // deliberate replay) bills the same campaign twice. The caller supplies an optional
+  // `impressionId` nonce; we key a short-TTL Set on "campaignId:userId:nonce" so
+  // that replays within the TTL window are no-ops.
+  //
+  // RESIDUAL RISK: this is process-local — a process restart or multiple BFF
+  // instances drop the cache. The correct long-term fix is a DB-level unique index on
+  // (campaign_id, user_id, impression_id) inside record_campaign_impression. The
+  // nonce is also client-controlled and unsigned; an adversary who varies nonces can
+  // still multiply-charge. This guard stops accidental retries / thundering herds.
+  //
+  // TTL: 60 s — long enough to absorb any realistic network-retry window; short
+  // enough that the Map doesn't grow unboundedly on a long-lived process.
+  const DEDUP_TTL_MS = 60_000;
+  const seenNonces = new Set<string>();
+  function tryDedup(key: string): boolean {
+    // Returns true when this key was already seen (duplicate → skip charge).
+    if (seenNonces.has(key)) return true;
+    seenNonces.add(key);
+    setTimeout(() => seenNonces.delete(key), DEDUP_TTL_MS).unref?.();
+    return false;
+  }
+
   // UX-event sink — writes to abkhaz-auto Supabase (user_action_events).
   // No-op when AA_SUPABASE_URL/KEY env vars are empty (dev/tests).
   const eventStore: EventStore = opts.deps?.eventStore ?? createEventStore();
@@ -242,7 +267,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
     }
 
-    const body = (request.body ?? {}) as { userId?: unknown; promoId?: unknown };
+    const body = (request.body ?? {}) as { userId?: unknown; promoId?: unknown; impressionId?: unknown };
     const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
     const promoId = typeof body.promoId === 'string' ? body.promoId.trim() : '';
     if (!userId || !promoId) {
@@ -254,6 +279,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const campaignId = parseCampaignId(promoId);
     try {
       if (campaignId !== null) {
+        // Bug 2: idempotency guard. If the caller supplies an `impressionId` nonce,
+        // build a dedup key and skip the charge on a replay. Missing nonce → charge
+        // fires every time (backward-compat), with a logged residual-risk warning.
+        const nonce = typeof body.impressionId === 'string' ? body.impressionId.trim() : '';
+        if (nonce) {
+          const dedupKey = `${campaignId}:${userId}:${nonce}`;
+          if (tryDedup(dedupKey)) {
+            // Duplicate nonce within the TTL window — idempotent no-op. Return 200
+            // so the caller doesn't retry again (a 4xx would trigger another retry).
+            app.log.info({ campaignId, userId, nonce }, 'POST /impressions: duplicate nonce, charge skipped');
+            return reply.code(200).send({ ok: true });
+          }
+        } else {
+          // No nonce supplied — charge fires, but without a dedup handle we can't
+          // prevent accidental retries. Callers should always supply impressionId.
+          app.log.warn({ campaignId, userId }, 'POST /impressions: no impressionId nonce — dedup unavailable (residual replay risk)');
+        }
         await chargeService.recordCampaignImpression(campaignId, userId);
       } else {
         await deps.impressionStore.recordImpression(userId, promoId);

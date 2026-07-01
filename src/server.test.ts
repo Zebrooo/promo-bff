@@ -274,6 +274,66 @@ describe('POST /impressions routing (campaign vs house)', () => {
   });
 });
 
+describe('POST /impressions — idempotency (Bug 2)', () => {
+  // The /impressions endpoint is called by the storefront after rendering an ad.
+  // Without a dedup guard, a caller can replay the same request (or a network
+  // retry after a 502) and bill the same campaign twice.
+  //
+  // Fix: an optional `impressionId` nonce in the body acts as a short-TTL in-process
+  // dedup key (campaignId:userId:nonce). Same nonce → charge once; distinct nonce
+  // → charge again (expected: different real impressions). Missing nonce is accepted
+  // for backward-compat but logged as a residual-risk warning.
+  //
+  // RESIDUAL RISK: the dedup window is in-process and process-local (survives
+  // process restarts). A distributed dedup (Supabase unique index on impression_id
+  // inside record_campaign_impression) is the correct long-term fix. The nonce also
+  // comes from the client and is not cryptographically signed, so a determined caller
+  // can still vary the nonce to bill multiple times. The current fix reduces the
+  // accidental-retry / thundering-herd case, not the adversarial case.
+
+  function spies() {
+    const recordCampaignImpression = vi.fn(async () => {});
+    const deps = {
+      chargeService: { recordCampaignImpression } as ChargeService,
+      impressionStore: { getImpressions: async () => ({ counts: {}, lastShownAt: {} }), recordImpression: vi.fn(async () => {}) },
+    };
+    return { deps, recordCampaignImpression };
+  }
+  const postImp = (app: ReturnType<typeof buildServer>, payload: unknown) =>
+    app.inject({ method: 'POST', url: '/impressions', headers: AUTH, payload: payload as object });
+
+  it('same nonce → charge fires once even when the endpoint is called twice', async () => {
+    const { deps, recordCampaignImpression } = spies();
+    const app = buildServer({ logger: false, deps });
+    const payload = { userId: 'u1', promoId: 'campaign:9', impressionId: 'nonce-abc' };
+    const r1 = await postImp(app, payload);
+    const r2 = await postImp(app, payload); // exact replay
+    expect(r1.statusCode).toBe(200);
+    expect(r2.statusCode).toBe(200); // caller gets 200 (idempotent, not an error)
+    // The charge must fire exactly once.
+    expect(recordCampaignImpression).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('different nonces → two distinct charges (real impressions)', async () => {
+    const { deps, recordCampaignImpression } = spies();
+    const app = buildServer({ logger: false, deps });
+    await postImp(app, { userId: 'u1', promoId: 'campaign:9', impressionId: 'nonce-1' });
+    await postImp(app, { userId: 'u1', promoId: 'campaign:9', impressionId: 'nonce-2' });
+    expect(recordCampaignImpression).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
+  it('missing nonce is accepted (backward-compat) — charge fires', async () => {
+    const { deps, recordCampaignImpression } = spies();
+    const app = buildServer({ logger: false, deps });
+    const res = await postImp(app, { userId: 'u1', promoId: 'campaign:9' }); // no impressionId
+    expect(res.statusCode).toBe(200);
+    expect(recordCampaignImpression).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+});
+
 describe('POST /events', () => {
   const postEv = (
     app: ReturnType<typeof buildServer>,

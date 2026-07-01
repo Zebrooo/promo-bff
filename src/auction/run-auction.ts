@@ -30,10 +30,21 @@ export const solvencyCheck: AuctionEligibilityCheck = {
   isEligible: (c, ctx) => (ctx.balances.get(c.advertiserId) ?? 0) > 0,
 };
 
-/** Campaign must be under its total budget (null budget = unlimited). */
+/**
+ * Campaign must have enough remaining budget for at least one more CPM charge
+ * (null budget = unlimited). The condition is:
+ *
+ *   spentKopecks + cpmKopecks <= totalBudgetKopecks
+ *
+ * Bug 4 fix: the old check (spent < budget) let a campaign win when it was at
+ * totalBudget-1 kopecks, then charged a full CPM → overspend. The new check
+ * requires that the next charge fits entirely within the remaining budget.
+ */
 export const budgetCheck: AuctionEligibilityCheck = {
   name: 'budget',
-  isEligible: (c) => c.totalBudgetKopecks === null || c.spentKopecks < c.totalBudgetKopecks,
+  isEligible: (c) =>
+    c.totalBudgetKopecks === null ||
+    c.spentKopecks + c.cpmKopecks <= c.totalBudgetKopecks,
 };
 
 /** Campaign must target the requested page (null/empty target = all pages). */

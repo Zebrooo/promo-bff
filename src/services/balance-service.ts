@@ -16,7 +16,11 @@ export interface BalanceService {
 
 interface AccountRow {
   owner_user_id: string;
-  balance_kopecks: number;
+  // Bug 3 fix: PostgREST serialises bigint/numeric as JSON strings to avoid JS
+  // precision loss. We accept string | number here and coerce at the mapping
+  // boundary so all downstream arithmetic (solvency check, budget comparisons)
+  // always operates on JS numbers, not strings.
+  balance_kopecks: number | string;
 }
 
 function authHeaders(key: string): Record<string, string> {
@@ -38,7 +42,11 @@ export function createBalanceService(cfg: SupabaseConfig = config.supabase): Bal
     const res = await fetch(`${table}?${qs}`, { headers: authHeaders(serviceRoleKey) });
     if (!res.ok) throw new Error(`balance-service read failed: HTTP ${res.status}`);
     const rows = (await res.json()) as AccountRow[];
-    for (const row of rows) out.set(row.owner_user_id, row.balance_kopecks);
+    for (const row of rows) {
+      const kopecks = Number(row.balance_kopecks);
+      // Guard against corrupted rows (NaN would break solvency arithmetic).
+      out.set(row.owner_user_id, Number.isNaN(kopecks) ? 0 : kopecks);
+    }
     return out;
   }
 

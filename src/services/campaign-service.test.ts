@@ -70,3 +70,47 @@ describe('createCampaignService.getActiveBannerCampaigns', () => {
     expect(out).toEqual([]);
   });
 });
+
+describe('createCampaignService — kopeck string coercion (Bug 3)', () => {
+  // PostgREST serialises bigint/numeric columns as JSON strings to avoid JS
+  // precision loss. Without Number() coercion mapRow holds string values and all
+  // downstream arithmetic (budget checks, CPM comparisons in runAuction) is broken.
+  afterEach(() => vi.restoreAllMocks());
+  function mockFetch(status: number, body: unknown) {
+    const fn = vi.fn(async () => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response);
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+  const cfg = { url: 'https://db.example', serviceRoleKey: 'k', timeoutMs: 2000 };
+
+  it('coerces string cpm_kopecks/spent_kopecks/total_budget_kopecks to numbers', async () => {
+    mockFetch(200, [
+      {
+        id: 7,
+        advertiser_id: 'adv-1',
+        cpm_kopecks: '9000',           // string from PostgREST numeric column
+        creative: { format: 'popup', title: 'Hi' },
+        spent_kopecks: '1200',         // string
+        total_budget_kopecks: '30000', // string
+        target_pages: null,
+        banner_format: null,
+      },
+    ]);
+    const [c] = await createCampaignService(cfg).getCampaignsForSlot('home-popup');
+    expect(typeof c!.cpmKopecks).toBe('number');
+    expect(c!.cpmKopecks).toBe(9000);
+    expect(typeof c!.spentKopecks).toBe('number');
+    expect(c!.spentKopecks).toBe(1200);
+    expect(typeof c!.totalBudgetKopecks).toBe('number');
+    expect(c!.totalBudgetKopecks).toBe(30000);
+  });
+
+  it('null total_budget_kopecks stays null (unlimited budget)', async () => {
+    mockFetch(200, [
+      { id: 8, advertiser_id: 'adv-2', cpm_kopecks: '3000', creative: {}, spent_kopecks: '0', total_budget_kopecks: null, target_pages: null, banner_format: null },
+    ]);
+    const [c] = await createCampaignService(cfg).getCampaignsForSlot('home-popup');
+    expect(c!.totalBudgetKopecks).toBeNull();
+    expect(typeof c!.cpmKopecks).toBe('number');
+  });
+});
