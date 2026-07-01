@@ -17,6 +17,13 @@ export interface SelectPromoParams {
   /** Checker names to skip (e.g. ['limit','cooldown']). */
   skipCheckers?: string[];
   /**
+   * Creative formats the requesting surface accepts (e.g. ['topline'] for the top
+   * banner, ['popup','fullscreen','inline','divkit'] for the overlay). Lets one
+   * per-catalog queue serve multiple surfaces; the FormatChecker keeps only
+   * matching promos. Omitted/empty = no format filter (back-compat).
+   */
+  formats?: string[];
+  /**
    * Requesting device class. When set, the DeviceChecker drops promos whose
    * `deviceTarget` or `format` is incompatible (so select-promo falls through
    * to the next eligible promo). Omitted = no device filtering (back-compat;
