@@ -90,6 +90,6 @@ export async function handleSelectPromo(
   }
 
   // Hand back the whole promo, minus server-only selection fields.
-  const { name, startsAt, endsAt, targeting, maxImpressionsPerUser, cooldownHours, audience, sections, categories, sellerStatus, ...ad } = promo;
+  const { name, startsAt, endsAt, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
   return { status: 'ok', data: ad };
 }

@@ -90,10 +90,10 @@ describe('selectPromo', () => {
     __clearUserDataCache();
     const deps = makeDeps();
     const getImpressions = vi.spyOn(deps.impressionStore, 'getImpressions');
-    // skip the three userData checkers → only date + audience remain
+    // skip the four userData checkers → only date + audience remain
     await selectPromo([makePromo({ id: 'a' })], ctx, {
       deps,
-      skip: ['targeting', 'limit', 'cooldown'],
+      skip: ['targeting', 'limit', 'cooldown', 'chain'],
     });
     expect(getImpressions).not.toHaveBeenCalled();
   });

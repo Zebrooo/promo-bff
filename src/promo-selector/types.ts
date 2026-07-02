@@ -29,6 +29,10 @@ export interface Promo {
   maxImpressionsPerUser?: number;
   /** Minimum hours between two shows to the same user. 0 = no cooldown. */
   cooldownHours: number;
+  /** Chain: id of the predecessor promo. When set, this promo is eligible only
+   *  after the user has at least one recorded impression of that predecessor
+   *  (см. ChainChecker). Omitted = no chaining. */
+  afterPromoId?: string;
   /** Display format for the renderer. */
   format: PromoFormat;
   /** User-facing headline. */

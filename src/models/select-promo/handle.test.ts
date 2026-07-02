@@ -281,6 +281,38 @@ describe('handleSelectPromo', () => {
     expect(result).toMatchObject({ status: 'ok', data: { id: 'a' } });
   });
 
+  it('chain: queue [a, b(after:a)] serves a to a user with no impressions', async () => {
+    const a = makePromo({ id: 'a', title: 'A' });
+    const b = makePromo({ id: 'b', title: 'B', afterPromoId: 'a' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'chain-1' }, deps({ configService }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'a' } });
+  });
+
+  it('chain: b(after:a) is blocked while the predecessor has no recorded impression', async () => {
+    const b = makePromo({ id: 'b', title: 'B', afterPromoId: 'a' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [b], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'chain-3' }, deps({ configService }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('chain: after a is shown, b is served when a is excluded', async () => {
+    const a = makePromo({ id: 'a', title: 'A' });
+    const b = makePromo({ id: 'b', title: 'B', afterPromoId: 'a' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+    const impressionStore = fakeImpressionStore({
+      getImpressions: async () => ({ counts: { a: 1 }, lastShownAt: {} }),
+    });
+
+    const result = await handleSelectPromo(
+      { userId: 'chain-2', excludeIds: ['a'] },
+      deps({ configService, impressionStore }),
+    );
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'b' } });
+  });
+
   it('seller gate: shows a seller promo only to users with active listings', async () => {
     const promo = makePromo({ id: 'seller-only', sellerStatus: 'seller' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });

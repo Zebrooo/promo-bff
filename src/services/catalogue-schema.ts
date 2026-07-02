@@ -25,6 +25,9 @@ export const promoSchema = z.object({
     z.number().int().positive().optional(),
   ),
   cooldownHours: z.number().int().nonnegative(),
+  /** Chain: id of the predecessor promo — this promo shows only after the user
+   *  has a recorded impression of it (ChainChecker). Mirrors the cabinet schema. */
+  afterPromoId: z.string().min(1).max(64).optional(),
   format: promoFormatSchema,
   title: z.string().min(1),
   description: z.string().optional(),
