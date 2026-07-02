@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { selectPromo, WEB_CHECKERS } from './index';
+import { selectPromo, WEB_CHECKERS, type SelectionTrace } from './index';
 import { __clearUserDataCache, type SupplierDeps } from './checkers/suppliers';
 import { makePromo } from '../test-utils';
 
@@ -96,5 +96,87 @@ describe('selectPromo', () => {
       skip: ['targeting', 'limit', 'cooldown', 'chain'],
     });
     expect(getImpressions).not.toHaveBeenCalled();
+  });
+});
+
+describe('selectPromo trace (onTrace)', () => {
+  it('reports pass/skip per checker and the winner; is called exactly once', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    const result = await selectPromo([makePromo({ id: 'a' })], ctx, {
+      deps: makeDeps(),
+      onTrace: (t) => traces.push(t),
+    });
+    expect(result?.id).toBe('a');
+    expect(traces).toHaveLength(1);
+    const [trace] = traces;
+    expect(trace.selectedPromoId).toBe('a');
+    expect(trace.candidates).toHaveLength(1);
+    expect(trace.candidates[0].promoId).toBe('a');
+    // Every active checker produced a verdict, in evaluation order, no hardcoded subset.
+    expect(trace.candidates[0].checks.map((c) => c.checker)).toEqual(WEB_CHECKERS.map((c) => c.name));
+    // Default promo has no cap → the limit checker self-skips with its shouldSkip reason.
+    expect(trace.candidates[0].checks.find((c) => c.checker === 'limit')).toEqual({
+      checker: 'limit', outcome: 'skip', reason: 'no cap configured',
+    });
+    expect(trace.candidates[0].checks.find((c) => c.checker === 'date')).toEqual({
+      checker: 'date', outcome: 'pass', reason: '',
+    });
+    // A skip never carries an empty reason; a pass always does.
+    for (const chk of trace.candidates[0].checks) {
+      if (chk.outcome === 'skip') expect(chk.reason).not.toBe('');
+      if (chk.outcome === 'pass') expect(chk.reason).toBe('');
+    }
+  });
+
+  it('records a fail with the checker expect() reason and stops that candidate at the first fail', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    const expired = makePromo({ id: 'old', endsAt: '2000-01-01T00:00:00.000Z' });
+    const result = await selectPromo([expired, makePromo({ id: 'ok' })], ctx, {
+      deps: makeDeps(),
+      onTrace: (t) => traces.push(t),
+    });
+    expect(result?.id).toBe('ok');
+    const [trace] = traces;
+    expect(trace.selectedPromoId).toBe('ok');
+    expect(trace.candidates.map((c) => c.promoId)).toEqual(['old', 'ok']);
+    // 'old' fails the date checker first → later checkers never ran for it.
+    expect(trace.candidates[0].checks).toEqual([
+      { checker: 'date', outcome: 'fail', reason: 'now is within [startsAt, endsAt]' },
+    ]);
+  });
+
+  it('reports selectedPromoId null when every candidate fails', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    const expired = makePromo({ id: 'old', endsAt: '2000-01-01T00:00:00.000Z' });
+    const result = await selectPromo([expired], ctx, { deps: makeDeps(), onTrace: (t) => traces.push(t) });
+    expect(result).toBeNull();
+    expect(traces).toHaveLength(1);
+    expect(traces[0].selectedPromoId).toBeNull();
+    expect(traces[0].candidates).toHaveLength(1);
+  });
+
+  it('excludeIds drops promos BEFORE the walk — they never appear in the trace', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    await selectPromo([makePromo({ id: 'a' }), makePromo({ id: 'b' })], { ...ctx, excludeIds: ['a'] }, {
+      deps: makeDeps(),
+      onTrace: (t) => traces.push(t),
+    });
+    expect(traces[0].candidates.map((c) => c.promoId)).toEqual(['b']);
+    expect(traces[0].selectedPromoId).toBe('b');
+  });
+
+  it('a throwing onTrace does not break selection', async () => {
+    __clearUserDataCache();
+    const result = await selectPromo([makePromo({ id: 'a' })], ctx, {
+      deps: makeDeps(),
+      onTrace: () => {
+        throw new Error('observer boom');
+      },
+    });
+    expect(result?.id).toBe('a');
   });
 });

@@ -13,6 +13,33 @@ import {
 export { WEB_CHECKERS };
 export type { SupplierDeps };
 
+/** How a single checker judged a single candidate promo. */
+export type CheckOutcome = 'pass' | 'fail' | 'skip';
+
+export interface CheckerTraceEntry {
+  checker: string;
+  outcome: CheckOutcome;
+  /** fail → the checker's expect() string; skip → the shouldSkip() reason; pass → ''. */
+  reason: string;
+}
+
+export interface CandidateTrace {
+  promoId: string;
+  /** Checker verdicts in evaluation order; stops at the first fail (later checkers never ran). */
+  checks: CheckerTraceEntry[];
+}
+
+/**
+ * Full record of one selectPromo walk: every evaluated candidate with its
+ * per-checker verdicts, plus the winner (null = nothing passed). Candidates
+ * after the winner (and promos dropped by excludeIds BEFORE the walk) are
+ * absent — they were never evaluated.
+ */
+export interface SelectionTrace {
+  candidates: CandidateTrace[];
+  selectedPromoId: string | null;
+}
+
 export interface SelectPromoContext {
   userId: string;
   authenticated: boolean;
@@ -34,6 +61,12 @@ export interface SelectPromoOptions {
   skip?: string[];
   deps: SupplierDeps;
   logger?: Logger;
+  /**
+   * Observability hook: called exactly once per walk (right before returning)
+   * with the full SelectionTrace. Omitted = zero-overhead (no trace collected).
+   * A throwing callback is swallowed — observability must never break selection.
+   */
+  onTrace?: (trace: SelectionTrace) => void;
 }
 
 /**
@@ -55,6 +88,19 @@ export async function selectPromo(
   const candidates = excludeIds.length > 0 ? promos.filter((p) => !excludeIds.includes(p.id)) : promos;
   const data = await loadSuppliers(active, { userId: ctx.userId, authenticated: ctx.authenticated }, opts.deps);
 
+  // Trace is collected only when a consumer asked for it; the extra shouldSkip()
+  // classification call is pure/cheap by the Checker contract, and run() itself
+  // stays the single source of truth for the actual pass/fail decision.
+  const trace: SelectionTrace | null = opts.onTrace ? { candidates: [], selectedPromoId: null } : null;
+  const emitTrace = () => {
+    if (!trace || !opts.onTrace) return;
+    try {
+      opts.onTrace(trace);
+    } catch {
+      // observability must never break selection
+    }
+  };
+
   for (const promo of candidates) {
     const ctxP: CheckContext = {
       promo,
@@ -66,17 +112,36 @@ export async function selectPromo(
       device: ctx.device,
       formats: ctx.formats,
     };
+    const checks: CheckerTraceEntry[] = [];
     let passed = true;
     for (const c of active) {
+      // Classification only (run() re-evaluates shouldSkip internally).
+      const skipReason = trace ? c.shouldSkip(ctxP) : false;
       // Cast off Partial is safe: `active` drives both loadSuppliers and this
       // loop, so every supplier any active checker declares is present in `data`,
       // and each checker reads only its own declared id.
-      if (!(await c.run(ctxP, data as SuppliersData<SupplierId>, opts.logger))) {
+      const ok = await c.run(ctxP, data as SuppliersData<SupplierId>, opts.logger);
+      if (trace) {
+        checks.push(
+          skipReason
+            ? { checker: c.name, outcome: 'skip', reason: skipReason }
+            : ok
+              ? { checker: c.name, outcome: 'pass', reason: '' }
+              : { checker: c.name, outcome: 'fail', reason: c.expect() },
+        );
+      }
+      if (!ok) {
         passed = false;
         break;
       }
     }
-    if (passed) return promo;
+    trace?.candidates.push({ promoId: promo.id, checks });
+    if (passed) {
+      if (trace) trace.selectedPromoId = promo.id;
+      emitTrace();
+      return promo;
+    }
   }
+  emitTrace();
   return null;
 }
