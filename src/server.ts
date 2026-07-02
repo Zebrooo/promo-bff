@@ -11,6 +11,7 @@ import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
+import { createCheckerStatsService, type CheckerStatsService } from './services/checker-stats';
 import { withTimeout } from './util/with-timeout';
 import { createListingService } from './services/listing-service';
 import { createCampaignService } from './services/campaign-service';
@@ -104,12 +105,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   app.register(metricsPlugin, { endpoint: '/metrics', clearRegisterOnInit: true });
   const authenticator = opts.authenticator ?? defaultAuthenticator();
 
+  // Checker-observability aggregator — counts every checker verdict per promo per
+  // queue and batch-writes promo_checker_stats to the AA Supabase once a minute
+  // (Grafana "Promo Checkers" dashboard). No-op when AA is unconfigured (dev/tests).
+  const checkerStats: CheckerStatsService = opts.deps?.checkerStats ?? createCheckerStatsService({ logger: app.log });
+  checkerStats.start();
+  app.addHook('onClose', async () => {
+    await checkerStats.stop();
+  });
+
   const deps: SelectPromoDeps = {
     configService: createConfigService(app.log),
     userService: createUserService(),
     billingService: createBillingService(),
     impressionStore: createImpressionStore(),
     listingService: createListingService(),
+    checkerStats,
     logger: app.log,
     ...opts.deps,
   };

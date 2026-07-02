@@ -3,8 +3,9 @@ import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
+import type { CheckerStatsService } from '../../services/checker-stats';
 import type { Promo } from '../../promo-selector/types';
-import { selectPromo } from '../../promo-selector';
+import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import type { ModelResult, SelectPromoParams } from './types';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
@@ -21,6 +22,8 @@ export interface SelectPromoDeps {
   impressionStore: ImpressionStore;
   listingService: ListingService;
   logger?: Logger;
+  /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
+  checkerStats?: CheckerStatsService;
   /** Injectable clock for deterministic tests; defaults to real time. */
   now?: () => Date;
 }
@@ -53,6 +56,7 @@ export async function handleSelectPromo(
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
 
   let promo: Promo | null;
+  let trace: SelectionTrace | undefined;
   try {
     promo = await selectPromo(
       promos,
@@ -66,7 +70,14 @@ export async function handleSelectPromo(
         formats: params.formats,
         excludeIds: params.excludeIds,
       },
-      { skip, deps: { userService, billingService, impressionStore, listingService }, logger },
+      {
+        skip,
+        deps: { userService, billingService, impressionStore, listingService },
+        logger,
+        onTrace: (t) => {
+          trace = t;
+        },
+      },
     );
   } catch (err) {
     // The userData supplier bundles profile + subscription + impressions in one
@@ -76,6 +87,14 @@ export async function handleSelectPromo(
     // stays neutral so on-call isn't pointed only at Supabase.
     logger?.error({ err }, 'select-promo: user data load failed');
     return { status: 'error', reason: 'impression_store_unavailable' };
+  }
+
+  // Observability: fold the per-checker verdicts into the minute-bucket counters
+  // (flushed to promo_checker_stats → Grafana) and keep the FULL trace in the
+  // debug log — invisible at the default level, one LOG_LEVEL=debug away.
+  if (trace) {
+    deps.checkerStats?.recordSelection(queueName, trace);
+    logger?.debug?.({ trace: { queue: queueName, ...trace } }, 'promo selection trace');
   }
 
   if (!promo) {

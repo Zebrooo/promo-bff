@@ -343,6 +343,73 @@ describe('handleSelectPromo', () => {
     expect(result).toMatchObject({ status: 'ok', data: { id: 'b' } });
   });
 
+  it('feeds the selection trace into deps.checkerStats with the resolved queue name', async () => {
+    const recorded: { queue: string; trace: unknown }[] = [];
+    const checkerStats = {
+      recordSelection: (queue: string, trace: unknown) => recorded.push({ queue, trace }),
+      flush: async () => {},
+      start: () => {},
+      stop: async () => {},
+    };
+    const result = await handleSelectPromo({ userId: 'obs-1', queue: 'home' }, deps({ checkerStats }));
+    expect(result.status).toBe('ok');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].queue).toBe('home');
+    expect(recorded[0].trace).toMatchObject({
+      selectedPromoId: 'promo-1',
+      candidates: [{ promoId: 'promo-1' }],
+    });
+  });
+
+  it('records a no_promo trace (selectedPromoId null) when the checkers filter everything', async () => {
+    const recorded: { queue: string; trace: { selectedPromoId: string | null } }[] = [];
+    const checkerStats = {
+      recordSelection: (queue: string, trace: { selectedPromoId: string | null }) => recorded.push({ queue, trace }),
+      flush: async () => {},
+      start: () => {},
+      stop: async () => {},
+    };
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ endsAt: '2000-01-01T00:00:00.000Z' })], persist: false }),
+    });
+    const result = await handleSelectPromo({ userId: 'obs-2' }, deps({ configService, checkerStats }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].queue).toBe('main');
+    expect(recorded[0].trace.selectedPromoId).toBeNull();
+  });
+
+  it('logs the full trace at debug level ("promo selection trace")', async () => {
+    const debugs: { obj: unknown; msg?: string }[] = [];
+    const logger = {
+      info: () => {},
+      error: () => {},
+      debug: (obj: unknown, msg?: string) => debugs.push({ obj, msg }),
+    };
+    await handleSelectPromo({ userId: 'obs-3', queue: 'home' }, deps({ logger }));
+    const entry = debugs.find((d) => d.msg === 'promo selection trace');
+    expect(entry).toBeDefined();
+    expect(entry?.obj).toMatchObject({
+      trace: { queue: 'home', selectedPromoId: 'promo-1' },
+    });
+  });
+
+  it('does not record stats when the supplier load fails (no trace was produced)', async () => {
+    const recorded: unknown[] = [];
+    const checkerStats = {
+      recordSelection: (...args: unknown[]) => recorded.push(args),
+      flush: async () => {},
+      start: () => {},
+      stop: async () => {},
+    };
+    const promo = makePromo({ id: 'x', cooldownHours: 24 });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const impressionStore = fakeImpressionStore({ getImpressions: async () => { throw new Error('supabase down'); } });
+    const result = await handleSelectPromo({ userId: 'obs-4' }, deps({ configService, impressionStore, checkerStats }));
+    expect(result.status).toBe('error');
+    expect(recorded).toEqual([]);
+  });
+
   it('seller gate: shows a seller promo only to users with active listings', async () => {
     const promo = makePromo({ id: 'seller-only', sellerStatus: 'seller' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
