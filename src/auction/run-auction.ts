@@ -10,6 +10,13 @@
  */
 import type { CampaignCandidate } from '../services/campaign-service';
 
+/** Вариант D: доля позиций in-feed ленты, зарезервированная под верхние места по
+ *  ставке (поверх равной базы). За это и платят за верх — выше место крутится чаще.
+ *  Держим согласованным с прогнозом кабинета (forecast.ts). */
+export const PREMIUM_POOL = 0.4;
+/** Как премиум-пул делится между местами 1 / 2 / 3 (ниже третьего — без премии). */
+export const PREMIUM_TIERS = [0.5, 0.3, 0.2] as const;
+
 export interface AuctionCheckContext {
   /** advertiserId -> balance_kopecks (missing = treated as 0). */
   balances: Map<string, number>;
@@ -210,38 +217,73 @@ export function allocateFeedFill(
   // Lone advertiser fills the whole feed; otherwise cap each advertiser's share.
   const advCap = distinctAdvertisers > 1 ? Math.max(1, Math.ceil(count * share)) : count;
 
-  // ROUND-ROBIN: место за кругом — каждой кампании по одному, повтор ТОЛЬКО после
-  // полного круга (когда все уже показались). Порядок круга: наименее показанные
-  // этому юзеру вперёд (раунды продвигаются по просмотрам — «после того как каждая
-  // получит просмотр, разыгрываем заново»), при равенстве — выше CPM (порядок
-  // выигрыша), затем меньший id. Так одна РК не занимает первые N мест подряд —
-  // кампании чередуются; повтор — лишь когда круг пройден. Частотный кап (budgetOf)
-  // и доля рекламодателя (advCap) остаются бэкстопами.
+  // ВАРИАНТ D — премиум-пул за верхнее место. Раньше лента была чистым
+  // round-robin (всем поровну, CPM — лишь тай-брейк; «no CPM domination»). Теперь
+  // ДОЛЯ позиций PREMIUM_POOL резервируется под топ-3 по ставке (тарифы
+  // PREMIUM_TIERS), а остальное по-прежнему делится поровну round-robin'ом. Так
+  // выше ставка → реально чаще показ, но без полного доминирования: база остаётся
+  // равной, а доля рекламодателя (advCap) и частотный кап (budgetOf) — бэкстопы.
   const seenOf = (c: CampaignCandidate): number => opts.seenCounts?.[`campaign:${c.id}`] ?? 0;
+
+  // Целевое число появлений на кампанию = премия топ-3 + равная база (round-robin).
+  const target = new Map<number, number>(eligible.map((c) => [c.id, 0]));
+  const byCpm = [...eligible].sort(
+    (a, b) => (Math.max(1, b.cpmKopecks) - Math.max(1, a.cpmKopecks)) || (a.id - b.id),
+  );
+  const premiumPositions = Math.floor(count * PREMIUM_POOL);
+  let premiumAssigned = 0;
+  PREMIUM_TIERS.forEach((tier, i) => {
+    const c = byCpm[i];
+    if (!c) return;
+    const extra = Math.round(premiumPositions * tier);
+    target.set(c.id, (target.get(c.id) ?? 0) + extra);
+    premiumAssigned += extra;
+  });
+  // База: «наименее показанные вперёд», затем дороже, затем меньший id.
   const order = [...eligible].sort(
     (a, b) =>
       (seenOf(a) - seenOf(b)) ||
       (Math.max(1, b.cpmKopecks) - Math.max(1, a.cpmKopecks)) ||
       (a.id - b.id),
   );
+  for (let placedBase = 0, i = 0; placedBase < Math.max(0, count - premiumAssigned); placedBase++, i++) {
+    const c = order[i % order.length]!;
+    target.set(c.id, (target.get(c.id) ?? 0) + 1);
+  }
 
-  const advUsed = new Map<string, number>();
+  // Эмит count позиций по весам target — smooth weighted round-robin (Nginx SWRR):
+  // веса раскидываются ровно, без кластеров. Тай-брейк сохраняет прежнюю семантику
+  // (наименее показанные → дороже → меньший id). Не превышаем target, частотный
+  // бюджет (budgetOf) и долю рекламодателя (advCap).
+  const weightOf = (c: CampaignCandidate): number => target.get(c.id) ?? 0;
+  const current = new Map<number, number>(eligible.map((c) => [c.id, 0]));
   const usedByCampaign = new Map<number, number>();
+  const advUsed = new Map<string, number>();
   const out: CampaignCandidate[] = [];
-  // Крутим круги, пока не наберём count или пока никто не может встать (исчерпаны
-  // частотные бюджеты / доли рекламодателей) — тогда место в ленте просто пустует.
-  let placedThisRound = true;
-  while (out.length < count && placedThisRound) {
-    placedThisRound = false;
-    for (const c of order) {
-      if (out.length >= count) break;
-      if ((usedByCampaign.get(c.id) ?? 0) >= budgetOf(c)) continue;
-      if ((advUsed.get(c.advertiserId) ?? 0) >= advCap) continue;
-      out.push(c);
-      usedByCampaign.set(c.id, (usedByCampaign.get(c.id) ?? 0) + 1);
-      advUsed.set(c.advertiserId, (advUsed.get(c.advertiserId) ?? 0) + 1);
-      placedThisRound = true;
-    }
+  while (out.length < count) {
+    const pickable = eligible.filter(
+      (c) =>
+        (usedByCampaign.get(c.id) ?? 0) < weightOf(c) &&
+        (usedByCampaign.get(c.id) ?? 0) < budgetOf(c) &&
+        (advUsed.get(c.advertiserId) ?? 0) < advCap,
+    );
+    if (pickable.length === 0) break;
+    const totalW = pickable.reduce((s, c) => s + weightOf(c), 0);
+    for (const c of pickable) current.set(c.id, (current.get(c.id) ?? 0) + weightOf(c));
+    let best = pickable[0]!;
+    const better = (c: CampaignCandidate, b: CampaignCandidate): boolean => {
+      const cc = current.get(c.id) ?? 0;
+      const cb = current.get(b.id) ?? 0;
+      if (cc !== cb) return cc > cb;
+      if (seenOf(c) !== seenOf(b)) return seenOf(c) < seenOf(b);
+      if (c.cpmKopecks !== b.cpmKopecks) return c.cpmKopecks > b.cpmKopecks;
+      return c.id < b.id;
+    };
+    for (const c of pickable) if (better(c, best)) best = c;
+    current.set(best.id, (current.get(best.id) ?? 0) - totalW);
+    out.push(best);
+    usedByCampaign.set(best.id, (usedByCampaign.get(best.id) ?? 0) + 1);
+    advUsed.set(best.advertiserId, (advUsed.get(best.advertiserId) ?? 0) + 1);
   }
   return out;
 }
