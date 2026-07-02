@@ -70,8 +70,11 @@ export interface Promo {
   /** Multistep format only: wizard steps (2..6, title ≤ 80 / body ≤ 240 — the
    *  cabinet enforces the bounds). Rendered by @zebrooo/promo-renderer's
    *  MultistepPromo. A renderable field: select-promo hands it to the client
-   *  untouched (NOT in the handle.ts server-only strip list). */
-  steps?: { title: string; body: string }[];
+   *  untouched (NOT in the handle.ts server-only strip list).
+   *  `imageUrl` (optional, http(s) URL ≤ 1024, png/jpg/webp/gif) — per-step
+   *  picture/gif shown in the wizard's stage zone; takes priority over the
+   *  host multistepStage slot (@zebrooo/promo-renderer 0.12.0). */
+  steps?: { title: string; body: string; imageUrl?: string }[];
   /** Multistep format only: how the wizard presents itself — 'modal' (default,
    *  centered dialog) or 'fullscreen' (full-viewport takeover; renderer's
    *  zr-multistep--fullscreen, @zebrooo/promo-renderer 0.11.0). A renderable

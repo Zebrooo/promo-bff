@@ -55,10 +55,13 @@ export const promoSchema = z.object({
   anchor: z.string().min(1).optional(),
   /** Multistep format: wizard steps (2..6). Optional at the field level;
    *  required for format==='multistep' via the refine below. Mirrors the
-   *  cabinet schema byte-for-byte (title ≤ 80, body ≤ 240). */
+   *  cabinet schema byte-for-byte (title ≤ 80, body ≤ 240; optional per-step
+   *  imageUrl — http(s) picture/gif, ≤ 1024 chars — rendered in the stage
+   *  zone by MultistepPromo with priority over the host multistepStage slot). */
   steps: z.array(z.object({
     title: z.string().min(1).max(80),
     body:  z.string().min(1).max(240),
+    imageUrl: z.string().url().max(1024).optional(),
   })).min(2).max(6).optional(),
   /** Multistep only: 'modal' (default) or 'fullscreen'. Applicable to the
    *  multistep format only (refine below). Mirrors the cabinet schema. */
