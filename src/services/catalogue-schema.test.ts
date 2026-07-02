@@ -29,6 +29,12 @@ describe('promoSchema', () => {
     expect(() => promoSchema.parse(makePromo({ format: 'topline' }))).not.toThrow();
   });
 
+  it('accepts the custom format with a variant', () => {
+    const parsed = promoSchema.parse(makePromo({ format: 'custom', variant: 'reklama-onboarding' }));
+    expect(parsed.format).toBe('custom');
+    expect(parsed.variant).toBe('reklama-onboarding');
+  });
+
   it('rejects a promo missing required fields', () => {
     expect(() => promoSchema.parse({ id: 'x' })).toThrow();
   });
@@ -199,6 +205,7 @@ const ALL_PROMO_FORMATS = [
   'divkit',
   'tooltip',
   'multistep',
+  'custom',
 ] as const satisfies readonly PromoFormat[];
 
 type MissingFromList = Exclude<PromoFormat, (typeof ALL_PROMO_FORMATS)[number]>;

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Promo } from '../promo-selector/types';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
-export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep']);
+export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 
@@ -29,6 +29,11 @@ export const promoSchema = z.object({
    *  has a recorded impression of it (ChainChecker). Mirrors the cabinet schema. */
   afterPromoId: z.string().min(1).max(64).optional(),
   format: promoFormatSchema,
+  /** Custom format only: picks the host-owned render function via the
+   *  <PromoProvider customFormats> map. Field-level optional here; the cabinet
+   *  enforces "required + registered variant" for format==='custom'. Mirrors
+   *  the cabinet schema. */
+  variant: z.string().min(1).max(64).optional(),
   title: z.string().min(1),
   description: z.string().optional(),
   imageUrl: z.string().url().optional(),
