@@ -218,7 +218,8 @@ async function runLive({ strictEmpty }) {
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
   const region = process.env.AWS_REGION ?? 'us-east-1';
-  const keyPrefix = process.env.PROMO_S3_KEY_PREFIX ?? '';
+  // same env var the BFF itself reads (src/config.ts); legacy PROMO_S3_KEY_PREFIX kept as fallback
+  const keyPrefix = process.env.PROMO_KEY_PREFIX ?? process.env.PROMO_S3_KEY_PREFIX ?? '';
 
   if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
     console.error('[bff-smoke] missing PROMO_S3_ENDPOINT / PROMO_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY');
