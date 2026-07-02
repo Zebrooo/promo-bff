@@ -91,6 +91,30 @@ describe('multistep format (steps)', () => {
   it('does not require steps for non-multistep formats', () => {
     expect(() => promoSchema.parse(makePromo())).not.toThrow();
   });
+
+  it('accepts an optional per-step imageUrl (http(s) picture/gif)', () => {
+    const parsed = promoSchema.parse(makePromo({
+      format: 'multistep',
+      steps: [{ ...step(1), imageUrl: 'https://cdn.example.com/step-1.gif' }, step(2)],
+    }));
+    expect(parsed.steps?.[0].imageUrl).toBe('https://cdn.example.com/step-1.gif');
+    expect(parsed.steps?.[1].imageUrl).toBeUndefined();
+  });
+
+  it('rejects a step imageUrl that is not a URL or is over 1024 chars', () => {
+    expect(() =>
+      promoSchema.parse(makePromo({
+        format: 'multistep',
+        steps: [{ ...step(1), imageUrl: 'not-a-url' }, step(2)],
+      })),
+    ).toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({
+        format: 'multistep',
+        steps: [{ ...step(1), imageUrl: `https://cdn.example.com/${'x'.repeat(1024)}.png` }, step(2)],
+      })),
+    ).toThrow();
+  });
 });
 
 describe('multistep presentation (modal | fullscreen)', () => {
