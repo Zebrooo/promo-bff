@@ -40,9 +40,13 @@ describe('handleFeedFill', () => {
     if (res.status !== 'ok') return;
     expect(res.data.length).toBe(10);
     expect(res.data.every((ad) => ad.id === 'campaign:1' || ad.id === 'campaign:2')).toBe(true);
-    // Round-robin: one promo per round → two campaigns split 5/5; CPM dominance
-    // is expressed by order — the auction winner takes the first slot of each round.
-    expect(res.data.filter((ad) => ad.id === 'campaign:1').length).toBe(5);
+    // Премиум-пул за верхнее место (Вариант D, PR #5): выше ставка крутится
+    // чаще — победитель аукциона берёт первый слот И строго больше слотов,
+    // чем проигравший (точная доля — деталь весовой ротации, не контракт).
+    const winnerSlots = res.data.filter((ad) => ad.id === 'campaign:1').length;
+    const loserSlots = res.data.filter((ad) => ad.id === 'campaign:2').length;
+    expect(winnerSlots).toBeGreaterThan(loserSlots);
+    expect(loserSlots).toBeGreaterThan(0); // ротация жива — не монополия
     expect(res.data[0].id).toBe('campaign:1');
   });
 
