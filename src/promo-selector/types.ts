@@ -2,7 +2,7 @@
 
 export type SubscriptionLevel = 'none' | 'plus' | 'premium';
 
-export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip';
+export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep';
 
 export interface PromoTargeting {
   minAge?: number;
@@ -67,6 +67,11 @@ export interface Promo {
   /** Tooltip format only: id of the canonical host anchor element to point at
    *  (host marks it data-promo-anchor="<id>"). Required when format===='tooltip'. */
   anchor?: string;
+  /** Multistep format only: wizard steps (2..6, title ≤ 80 / body ≤ 240 — the
+   *  cabinet enforces the bounds). Rendered by @zebrooo/promo-renderer's
+   *  MultistepPromo. A renderable field: select-promo hands it to the client
+   *  untouched (NOT in the handle.ts server-only strip list). */
+  steps?: { title: string; body: string }[];
   /** Page sections this promo may show in (e.g. ['avto','realty']). Omitted = any section. */
   sections?: string[];
   /** Page categories this promo may show in. Omitted = any category. */

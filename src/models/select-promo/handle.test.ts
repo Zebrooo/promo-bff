@@ -124,6 +124,20 @@ describe('handleSelectPromo', () => {
     });
   });
 
+  it('hands multistep steps to the client (steps is renderable, NOT server-only)', async () => {
+    const steps = [
+      { title: 'Раз', body: 'Первый шаг' },
+      { title: 'Два', body: 'Второй шаг' },
+    ];
+    const ad = makePromo({ id: 'ms-1', format: 'multistep', title: 'Wizard', steps });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result).toEqual({
+      status: 'ok',
+      data: { id: 'ms-1', format: 'multistep', title: 'Wizard', steps },
+    });
+  });
+
   it('uses the named queue from params.queue', async () => {
     let capturedName: string | undefined;
     const configService = fakeConfigService({
