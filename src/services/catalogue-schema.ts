@@ -60,6 +60,9 @@ export const promoSchema = z.object({
     title: z.string().min(1).max(80),
     body:  z.string().min(1).max(240),
   })).min(2).max(6).optional(),
+  /** Multistep only: 'modal' (default) or 'fullscreen'. Applicable to the
+   *  multistep format only (refine below). Mirrors the cabinet schema. */
+  presentation: z.enum(['modal', 'fullscreen']).optional(),
   sections: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
   audience: audienceSchema.optional(),
@@ -77,6 +80,13 @@ export const promoSchema = z.object({
   .refine((p) => p.format !== 'multistep' || (Array.isArray(p.steps) && p.steps.length >= 2), {
     message: 'steps (2..6) are required for the multistep format',
     path: ['steps'],
+  })
+  // presentation is a multistep-only knob (the cabinet sanitizes it away for
+  // every other format) — mirror the cabinet refine so a hand-edited pool
+  // can't smuggle it onto formats the renderer ignores it for.
+  .refine((p) => p.presentation === undefined || p.format === 'multistep', {
+    message: 'presentation is only supported by the multistep format',
+    path: ['presentation'],
   });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)

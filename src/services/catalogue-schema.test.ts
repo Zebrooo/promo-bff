@@ -93,6 +93,29 @@ describe('multistep format (steps)', () => {
   });
 });
 
+describe('multistep presentation (modal | fullscreen)', () => {
+  const step = (n: number) => ({ title: `Шаг ${n}`, body: `Текст ${n}` });
+  const multistep = () => makePromo({ format: 'multistep', steps: [step(1), step(2)] });
+
+  it('accepts modal and fullscreen on a multistep promo', () => {
+    expect(promoSchema.parse({ ...multistep(), presentation: 'modal' }).presentation).toBe('modal');
+    expect(promoSchema.parse({ ...multistep(), presentation: 'fullscreen' }).presentation).toBe('fullscreen');
+  });
+
+  it('is optional (omitted = renderer default modal)', () => {
+    expect(promoSchema.parse(multistep()).presentation).toBeUndefined();
+  });
+
+  it('rejects unknown presentation values', () => {
+    expect(() => promoSchema.parse({ ...multistep(), presentation: 'sheet' })).toThrow();
+  });
+
+  it('rejects presentation on non-multistep formats (refine, mirrors the cabinet)', () => {
+    expect(() => promoSchema.parse(makePromo({ presentation: 'fullscreen' }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ presentation: 'modal' }))).toThrow();
+  });
+});
+
 describe('catalogueSchema', () => {
   it('accepts an ordered array of promos and preserves order', () => {
     const parsed = catalogueSchema.parse([makePromo({ id: 'a' }), makePromo({ id: 'b' })]);

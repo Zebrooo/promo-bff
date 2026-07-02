@@ -72,6 +72,11 @@ export interface Promo {
    *  MultistepPromo. A renderable field: select-promo hands it to the client
    *  untouched (NOT in the handle.ts server-only strip list). */
   steps?: { title: string; body: string }[];
+  /** Multistep format only: how the wizard presents itself — 'modal' (default,
+   *  centered dialog) or 'fullscreen' (full-viewport takeover; renderer's
+   *  zr-multistep--fullscreen, @zebrooo/promo-renderer 0.11.0). A renderable
+   *  field: handed to the client untouched (NOT in the handle.ts strip list). */
+  presentation?: 'modal' | 'fullscreen';
   /** Page sections this promo may show in (e.g. ['avto','realty']). Omitted = any section. */
   sections?: string[];
   /** Page categories this promo may show in. Omitted = any category. */
