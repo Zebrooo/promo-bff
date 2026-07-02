@@ -1,4 +1,13 @@
+import { WEB_CHECKERS } from '../../promo-selector/checkers';
 import type { SelectPromoParams } from './types';
+
+/**
+ * Names a consumer may pass in skipCheckers — derived from the registered
+ * checker collection (single source of truth; adding a checker automatically
+ * extends the allowlist). An unknown name is rejected up front instead of
+ * being silently ignored by the selector's `skip.includes(...)` filter.
+ */
+const KNOWN_CHECKER_NAMES = WEB_CHECKERS.map((c) => c.name);
 
 export type ValidationResult =
   | { ok: true; params: SelectPromoParams }
@@ -50,6 +59,13 @@ export function validateParams(params: unknown): ValidationResult {
     ) {
       return { ok: false, error: 'params.skipCheckers must be an array of strings' };
     }
+    const unknown = (p.skipCheckers as string[]).filter((s) => !KNOWN_CHECKER_NAMES.includes(s));
+    if (unknown.length > 0) {
+      return {
+        ok: false,
+        error: `params.skipCheckers contains unknown checker(s): ${unknown.join(', ')}; allowed: ${KNOWN_CHECKER_NAMES.join(', ')}`,
+      };
+    }
     result.skipCheckers = p.skipCheckers as string[];
   }
 
@@ -73,6 +89,11 @@ export function validateParams(params: unknown): ValidationResult {
   }
 
   if (userObj !== null) {
+    // Strict: a stringly "false" would coerce truthy downstream and flip the
+    // audience gate; only an actual boolean (or absence) is accepted.
+    if (userObj.authenticated !== undefined && typeof userObj.authenticated !== 'boolean') {
+      return { ok: false, error: 'params.user.authenticated must be a boolean' };
+    }
     result.user = userObj as SelectPromoParams['user'];
   }
 

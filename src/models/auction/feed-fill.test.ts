@@ -31,7 +31,7 @@ function makeDeps(
 }
 
 describe('handleFeedFill', () => {
-  it('returns an ordered, count-length fill; higher cpm dominates', async () => {
+  it('returns an ordered, count-length fill; round-robin alternates, higher cpm leads', async () => {
     const res = await handleFeedFill(
       { count: 10, format: 'block' },
       makeDeps([cand(1, 'A', 9000), cand(2, 'A', 1000)], { A: 100_000 }),
@@ -40,7 +40,10 @@ describe('handleFeedFill', () => {
     if (res.status !== 'ok') return;
     expect(res.data.length).toBe(10);
     expect(res.data.every((ad) => ad.id === 'campaign:1' || ad.id === 'campaign:2')).toBe(true);
-    expect(res.data.filter((ad) => ad.id === 'campaign:1').length).toBeGreaterThan(5);
+    // Round-robin: one promo per round → two campaigns split 5/5; CPM dominance
+    // is expressed by order — the auction winner takes the first slot of each round.
+    expect(res.data.filter((ad) => ad.id === 'campaign:1').length).toBe(5);
+    expect(res.data[0].id).toBe('campaign:1');
   });
 
   it('a lone campaign fills every position (no blanks)', async () => {

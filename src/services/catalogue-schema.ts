@@ -67,6 +67,35 @@ export const catalogueSchema = z.array(promoSchema);
 
 /** The pool is an array of promos. */
 export const poolSchema = catalogueSchema;
+
+export interface LenientPoolResult {
+  /** Promos that passed promoSchema, in original pool order. */
+  promos: Promo[];
+  /** Items that failed promoSchema, with their zod issues (for logging). */
+  rejected: { promoId: string; issues: z.ZodIssue[] }[];
+}
+
+/**
+ * Per-item pool parsing: one corrupt promo must not dark every slot on the
+ * site (poolSchema.parse on the whole array would). Invalid entries are
+ * dropped and reported to the caller; a pool that is not an array at all
+ * still throws — that's a config error, not a single bad record.
+ */
+export function parsePoolLeniently(raw: unknown): LenientPoolResult {
+  const items = z.array(z.unknown()).parse(raw);
+  const promos: Promo[] = [];
+  const rejected: LenientPoolResult['rejected'] = [];
+  for (const item of items) {
+    const res = promoSchema.safeParse(item);
+    if (res.success) {
+      promos.push(res.data);
+    } else {
+      const id = (item as { id?: unknown } | null)?.id;
+      rejected.push({ promoId: typeof id === 'string' ? id : '<no id>', issues: res.error.issues });
+    }
+  }
+  return { promos, rejected };
+}
 /** The queue is an ordered array of promo ids. */
 export const queueSchema = z.array(z.string().min(1));
 /** Named queue object: persist flag + ordered ids. */
