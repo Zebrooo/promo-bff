@@ -117,6 +117,33 @@ describe('multistep format (steps)', () => {
   });
 });
 
+describe('multistep background fields (parity with popup)', () => {
+  const step = (n: number) => ({ title: `Шаг ${n}`, body: `Текст ${n}` });
+  const multistep = (extra: Record<string, unknown> = {}) =>
+    makePromo({ format: 'multistep', steps: [step(1), step(2)], ...extra });
+
+  it('accepts and preserves backgroundColor / backgroundImage / backgroundGradient on multistep', () => {
+    // Фон диалога/шторки multistep — те же поля, что у popup (image ⊃ gradient
+    // ⊃ color в composeOverlayBackground). Схема не гейтит их по формату, так
+    // что multistep-промо с фоном парсится и поля доезжают до storefront.
+    const parsed = promoSchema.parse(
+      multistep({
+        backgroundColor: '#123456',
+        backgroundImage: 'https://cdn.example.com/bg.png',
+        backgroundGradient: { from: '#ff0000', to: '#0000ff', angle: 90 },
+      }),
+    );
+    expect(parsed.backgroundColor).toBe('#123456');
+    expect(parsed.backgroundImage).toBe('https://cdn.example.com/bg.png');
+    expect(parsed.backgroundGradient).toEqual({ from: '#ff0000', to: '#0000ff', angle: 90 });
+  });
+
+  it('accepts a multistep promo with only backgroundGradient (from-only)', () => {
+    const parsed = promoSchema.parse(multistep({ backgroundGradient: { from: '#E11D2A' } }));
+    expect(parsed.backgroundGradient).toEqual({ from: '#E11D2A' });
+  });
+});
+
 describe('multistep presentation (modal | fullscreen)', () => {
   const step = (n: number) => ({ title: `Шаг ${n}`, body: `Текст ${n}` });
   const multistep = () => makePromo({ format: 'multistep', steps: [step(1), step(2)] });
