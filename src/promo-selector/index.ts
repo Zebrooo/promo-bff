@@ -23,6 +23,8 @@ export interface SelectPromoContext {
   device?: 'desktop' | 'touch';
   /** Formats the requesting surface accepts; gates promos by format. Undefined/empty = no filter. */
   formats?: string[];
+  /** Promo ids to drop from the queue BEFORE the checkers run. Undefined/empty = no exclusion. */
+  excludeIds?: string[];
 }
 
 export interface SelectPromoOptions {
@@ -47,9 +49,13 @@ export async function selectPromo(
   const checkers = opts.checkers ?? WEB_CHECKERS;
   const skip = opts.skip ?? [];
   const active = checkers.filter((c) => !skip.includes(c.name));
+  // Consumer-supplied exclusion (session-seen list) applies BEFORE the checker
+  // walk, so an excluded promo can't win even when it passes every checker.
+  const excludeIds = ctx.excludeIds ?? [];
+  const candidates = excludeIds.length > 0 ? promos.filter((p) => !excludeIds.includes(p.id)) : promos;
   const data = await loadSuppliers(active, { userId: ctx.userId, authenticated: ctx.authenticated }, opts.deps);
 
-  for (const promo of promos) {
+  for (const promo of candidates) {
     const ctxP: CheckContext = {
       promo,
       userId: ctx.userId,

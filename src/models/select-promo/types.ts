@@ -31,6 +31,13 @@ export interface SelectPromoParams {
    */
   device?: 'desktop' | 'touch';
   /**
+   * Promo ids to exclude from selection (dropped BEFORE the checkers run).
+   * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past
+   * promos it already showed this session without waiting for the impression
+   * beacon to land. Max 50 ids, each 1..64 chars. Omitted/empty = no exclusion.
+   */
+  excludeIds?: string[];
+  /**
    * Inline user context from the client: identity + audience gate. Profile and
    * subscription are sourced by the BFF's userData supplier, not passed in.
    */

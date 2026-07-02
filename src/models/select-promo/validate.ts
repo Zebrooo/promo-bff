@@ -9,6 +9,10 @@ import type { SelectPromoParams } from './types';
  */
 const KNOWN_CHECKER_NAMES = WEB_CHECKERS.map((c) => c.name);
 
+/** Bounds for params.excludeIds: a session-seen list, not a bulk filter. */
+const MAX_EXCLUDE_IDS = 50;
+const MAX_EXCLUDE_ID_LENGTH = 64;
+
 export type ValidationResult =
   | { ok: true; params: SelectPromoParams }
   | { ok: false; error: string };
@@ -79,6 +83,29 @@ export function validateParams(params: unknown): ValidationResult {
     // Drop empties/whitespace so a stray '' can't exclude every promo.
     const formats = (p.formats as string[]).map((s) => s.trim()).filter((s) => s !== '');
     if (formats.length > 0) result.formats = formats;
+  }
+
+  if (p.excludeIds !== undefined) {
+    if (
+      !Array.isArray(p.excludeIds) ||
+      p.excludeIds.some((s) => typeof s !== 'string')
+    ) {
+      return { ok: false, error: 'params.excludeIds must be an array of strings' };
+    }
+    // Strict: the client controls this list, so garbage is rejected up front
+    // instead of silently dropped (an empty id would never match anything and
+    // an unbounded list would let a client inflate the request body).
+    if (p.excludeIds.length > MAX_EXCLUDE_IDS) {
+      return { ok: false, error: `params.excludeIds must contain at most ${MAX_EXCLUDE_IDS} ids` };
+    }
+    const invalid = (p.excludeIds as string[]).some((s) => s.length < 1 || s.length > MAX_EXCLUDE_ID_LENGTH);
+    if (invalid) {
+      return {
+        ok: false,
+        error: `params.excludeIds elements must be 1..${MAX_EXCLUDE_ID_LENGTH} characters long`,
+      };
+    }
+    result.excludeIds = p.excludeIds as string[];
   }
 
   if (p.device !== undefined) {
