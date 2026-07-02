@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Promo } from '../promo-selector/types';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
-export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip']);
+export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 
@@ -53,6 +53,16 @@ export const promoSchema = z.object({
   /** Tooltip format: id of the canonical host anchor element (host marks it
    *  data-promo-anchor="<id>"). Mirrors the cabinet schema. */
   anchor: z.string().min(1).optional(),
+  /** Multistep format: wizard steps (2..6). Optional at the field level;
+   *  required for format==='multistep' via the refine below. Mirrors the
+   *  cabinet schema byte-for-byte (title ≤ 80, body ≤ 240). */
+  steps: z.array(z.object({
+    title: z.string().min(1).max(80),
+    body:  z.string().min(1).max(240),
+  })).min(2).max(6).optional(),
+  /** Multistep only: 'modal' (default) or 'fullscreen'. Applicable to the
+   *  multistep format only (refine below). Mirrors the cabinet schema. */
+  presentation: z.enum(['modal', 'fullscreen']).optional(),
   sections: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
   audience: audienceSchema.optional(),
@@ -63,7 +73,21 @@ export const promoSchema = z.object({
    * DeviceChecker): a `deviceTarget:'desktop'` promo is dropped for a touch
    * user and vice versa. Mirrors the cabinet schema. */
   deviceTarget: deviceTargetSchema.optional(),
-});
+})
+  // Multistep needs its steps — a step-less wizard would render to nothing on
+  // the storefront (fail-safe null), so reject it here like the cabinet does.
+  // With parsePoolLeniently this drops ONLY the broken promo, not the pool.
+  .refine((p) => p.format !== 'multistep' || (Array.isArray(p.steps) && p.steps.length >= 2), {
+    message: 'steps (2..6) are required for the multistep format',
+    path: ['steps'],
+  })
+  // presentation is a multistep-only knob (the cabinet sanitizes it away for
+  // every other format) — mirror the cabinet refine so a hand-edited pool
+  // can't smuggle it onto formats the renderer ignores it for.
+  .refine((p) => p.presentation === undefined || p.format === 'multistep', {
+    message: 'presentation is only supported by the multistep format',
+    path: ['presentation'],
+  });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)
 export const catalogueSchema = z.array(promoSchema);

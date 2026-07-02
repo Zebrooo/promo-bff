@@ -44,6 +44,78 @@ describe('promoSchema', () => {
   });
 });
 
+describe('multistep format (steps)', () => {
+  const step = (n: number) => ({ title: `Шаг ${n}`, body: `Текст ${n}` });
+
+  it('accepts a multistep promo with 2..6 steps', () => {
+    expect(() =>
+      promoSchema.parse(makePromo({ format: 'multistep', steps: [step(1), step(2)] })),
+    ).not.toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({
+        format: 'multistep',
+        steps: Array.from({ length: 6 }, (_, i) => step(i + 1)),
+      })),
+    ).not.toThrow();
+  });
+
+  it('rejects a multistep promo without steps (refine)', () => {
+    expect(() => promoSchema.parse(makePromo({ format: 'multistep' }))).toThrow();
+  });
+
+  it('rejects fewer than 2 or more than 6 steps', () => {
+    expect(() => promoSchema.parse(makePromo({ format: 'multistep', steps: [step(1)] }))).toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({
+        format: 'multistep',
+        steps: Array.from({ length: 7 }, (_, i) => step(i + 1)),
+      })),
+    ).toThrow();
+  });
+
+  it('rejects a step with an empty or over-limit title/body', () => {
+    expect(() =>
+      promoSchema.parse(makePromo({ format: 'multistep', steps: [{ title: '', body: 'x' }, step(2)] })),
+    ).toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({ format: 'multistep', steps: [{ title: 'x', body: '' }, step(2)] })),
+    ).toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({ format: 'multistep', steps: [{ title: 'т'.repeat(81), body: 'x' }, step(2)] })),
+    ).toThrow();
+    expect(() =>
+      promoSchema.parse(makePromo({ format: 'multistep', steps: [{ title: 'x', body: 'т'.repeat(241) }, step(2)] })),
+    ).toThrow();
+  });
+
+  it('does not require steps for non-multistep formats', () => {
+    expect(() => promoSchema.parse(makePromo())).not.toThrow();
+  });
+});
+
+describe('multistep presentation (modal | fullscreen)', () => {
+  const step = (n: number) => ({ title: `Шаг ${n}`, body: `Текст ${n}` });
+  const multistep = () => makePromo({ format: 'multistep', steps: [step(1), step(2)] });
+
+  it('accepts modal and fullscreen on a multistep promo', () => {
+    expect(promoSchema.parse({ ...multistep(), presentation: 'modal' }).presentation).toBe('modal');
+    expect(promoSchema.parse({ ...multistep(), presentation: 'fullscreen' }).presentation).toBe('fullscreen');
+  });
+
+  it('is optional (omitted = renderer default modal)', () => {
+    expect(promoSchema.parse(multistep()).presentation).toBeUndefined();
+  });
+
+  it('rejects unknown presentation values', () => {
+    expect(() => promoSchema.parse({ ...multistep(), presentation: 'sheet' })).toThrow();
+  });
+
+  it('rejects presentation on non-multistep formats (refine, mirrors the cabinet)', () => {
+    expect(() => promoSchema.parse(makePromo({ presentation: 'fullscreen' }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ presentation: 'modal' }))).toThrow();
+  });
+});
+
 describe('catalogueSchema', () => {
   it('accepts an ordered array of promos and preserves order', () => {
     const parsed = catalogueSchema.parse([makePromo({ id: 'a' }), makePromo({ id: 'b' })]);
@@ -75,6 +147,7 @@ const ALL_PROMO_FORMATS = [
   'banner',
   'divkit',
   'tooltip',
+  'multistep',
 ] as const satisfies readonly PromoFormat[];
 
 type MissingFromList = Exclude<PromoFormat, (typeof ALL_PROMO_FORMATS)[number]>;
