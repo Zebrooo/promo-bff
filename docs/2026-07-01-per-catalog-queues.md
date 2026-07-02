@@ -95,3 +95,36 @@ Once new queues serve, delete `home-banner`/`home-popup`/`tooltip`/`cabinet-onbo
 1. **Queue name style**: `transport/realty/goods/...` (proposed) vs `catalog-transport/...` (matches `AD_PAGES` keys exactly) vs `avto/nedvizhimost/...` (route roots). Pick one.
 2. **Do topline/overlay/tooltip actually need to differ per catalog?** If the operator wants the *same* topline everywhere, they author it into every catalog queue (or we keep a shared `home` queue as the default). Per-catalog is the capability; the operator decides how much to differentiate.
 3. **Sequencing vs the Cache-Components migration** — ToplineSlot is touched by both. Recommend: land the BFF format gate (A) now (harmless), do the storefront flip (C) *after or together with* the CC ToplineSlotClient move.
+
+---
+
+## SUPPLEMENT 2026-07-02 — итоги независимого аудита (48-агентный прогон, все пункты верифицированы адверсариально)
+
+Аудит план-vs-код по трём репозиториям подтвердил ядро плана (шаг A реализован корректно, b4b5119 смёржен в main; 4 call-site'а подтверждены; счётчики limit/cooldown ключуются на `promo.id` — переименование очередей их не трогает), но нашёл 4 подтверждённых пробела, которые меняют состав шагов.
+
+### S-1. `bff-smoke.mjs` НЕ является «the guard» (CRITICAL, подтверждено)
+`scripts/bff-smoke.mjs:26-31` захардкожен на 2 старые очереди (`home-banner`, `home-popup`) — tooltip/cabinet-onboarding уже сегодня не проверяются; пустая очередь = WARN, не fail (`:84-87`); поле `format` не читается вовсе → класс отказа «очередь непуста, но нет промо нужного формата → поверхность тёмная» невидим; после шага D скрипт начнёт падать на здоровой системе (`:74-76`).
+**Новый шаг A'** (до B): переписать smoke на data-driven матрицу «прод-очередь × требуемые форматы» (пул читает `format` из promos.json), пустота очереди — фатальна под флагом `--strict-empty` (включать на время cutover), старые имена уходят из матрицы синхронно с шагом D. Дополнительно: в BFF различать `no_promo` vs `queue_not_found` (`config-service.ts:37-40` сейчас молча отдаёт пустоту) хотя бы в логах.
+
+### S-2. Шаг D требует правки кода promo-cabinet (MAJOR, подтверждено)
+«No code change required» верно только для шага B (POST /api/queues принимает свободный slug). Но `CANONICAL_QUEUES` (`promo-cabinet/src/lib/catalogue.ts:74-79`) содержит все 4 старых имени, а `ensureMainQueue()` (`:125-134`) вызывается на каждом рендере `/cabinet/queues` и GET `/api/queues` и **воскрешает удалённые канонические очереди** (home-banner — снова с persist:true). Шаг D = код-изменение: убрать 4 старых имени из `CANONICAL_QUEUES` + деплой кабинета. Заодно (шаг B'): добавить 8 новых catalog-имён в `CANONICAL_QUEUES` — bootstrap сам создаст пустые очереди, оператору не надо кликать «Создать» 8 раз, и случайное удаление не оставит прод без очереди.
+
+### S-3. Конфликт с in-flight планом cabinet-onboarding (MAJOR, подтверждено) — РЕШЕНИЕ
+План онбординга (`2026-07-01-ad-cabinet-onboarding.md`) захардкодил очередь `cabinet-onboarding` как контракт, и его Part B уже задеплоена в код: `promo-cabinet catalogue.ts:78` (коммит 6800b86), `web promo-slots.ts:32`, `/api/fp/onboarding`. **Решение: очередь `cabinet-onboarding` НЕ переименовываем** — она и так per-catalog по смыслу (каталог «кабинет»), а `cabinet` убираем из naming map. Итоговый набор новых очередей: `home, transport, realty, goods, services, jobs, news, listing` (8 шт.) + существующая `cabinet-onboarding`. Naming map строки 29 и шаг D скорректированы этим решением: retire-список = `home-banner, home-popup, tooltip` (3 имени, БЕЗ cabinet-onboarding).
+
+### S-4. Нет процедуры бэкапа S3 при last-write-wins записи (MAJOR, подтверждено)
+Запись в бакет — безусловный PUT (`catalogue.ts:17-18`), версионирования нет; «each step is independently reversible» для B/D данными не обеспечено. **Новый шаг**: `promo-bff/scripts/s3-snapshot.mjs` — выкачивает `promos.json`, `queues.json`, все `queue-*.json` в датированную папку + печатает команду restore. Снапшот обязателен непосредственно перед B и перед D.
+
+### S-5. Правила миграции данных для шага B (дополнение к B2)
+- **Сохранять id промо** при перекладке (queue-json хранит только ссылки-ids): пере-создание промо сбросит частотные счётчики (`Frequency.ts:13,28` ключуются на promo.id) и переиграет показанные туры.
+- **sections/categories**: ContextChecker остаётся в пайплайне; промо с заполненными `sections`, попавшее в «чужую» каталожную очередь, молча не покажется. Правило: при перекладке в catalog-очередь `sections/categories` либо очищаются (каталог теперь задаёт очередь), либо проверяются на совместимость. Учесть fail-closed: сегодня section передаёт ТОЛЬКО overlay-роут — промо с sections на topline/tooltip/onboarding не показываются вовсе (`Context.ts:15`), это существующий баг-класс, см. план фиксов аудита.
+- Таргетинг `premium` мёртв (`billing-service.ts:41` возвращает только plus/none) — при раскладке не использовать; кабинет теперь предупреждает.
+
+### Мелкие правки плана (факт-чекинг)
+- A4: `ctx.formats` живёт в `checkers/Checker.ts` (CheckContext) + `promo-selector/index.ts` — файла `checkers/types.ts` не существует.
+- «Formats from the current client-side filters» — неточно: реально формат сегодня фильтрует только topline (`ToplineSlot.tsx:23`); наборы форматов таблицы — продуктовая фиксация, для overlay/tooltip это НОВОЕ серверное ограничение. В C5-смоук добавить проверку overlay на смешанной очереди.
+- Open decision 1 надо закрыть ДО начала B (имена уходят в S3-данные): рекомендация — короткие type-free имена из таблицы (`transport`, не `catalog-transport`), сведя в коде единую таблицу route-префикс → section → AD_PAGES key → queue.
+- Перф (не блокер): `fetchQueue` качает весь пул на каждый cache-miss очереди; с 9+ очередями пул будет скачиваться ×9 за TTL-окно. Фикс: отдельная кэш-запись `pool` в `config-service.ts`.
+
+### Обновлённая последовательность cutover
+`A (done, merged)` → **`A' (smoke rewrite + snapshot script + BFF hardening из плана фиксов)`** → deploy BFF → **snapshot S3** → `B (оператор; очереди авто-созданы через CANONICAL_QUEUES после деплоя кабинета)` → smoke (`--strict-empty`) → `C (storefront flip, после/вместе с CC ToplineSlot)` → smoke → **snapshot S3** → `D (retire home-banner/home-popup/tooltip: правка CANONICAL_QUEUES + деплой кабинета + удаление через UI + имена из smoke-матрицы)`.
