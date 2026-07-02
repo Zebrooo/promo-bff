@@ -139,4 +139,49 @@ describe('validateParams', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.params.userId).toBe('top');
   });
+
+  it('accepts a valid excludeIds array', () => {
+    const result = validateParams({ userId: 'u1', excludeIds: ['cab-onb-0-intro', 'cab-onb-1'] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.excludeIds).toEqual(['cab-onb-0-intro', 'cab-onb-1']);
+  });
+
+  it('omits excludeIds when absent (no exclusion filtering)', () => {
+    const result = validateParams({ userId: 'u1' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.excludeIds).toBeUndefined();
+  });
+
+  it('rejects excludeIds that is not an array of strings', () => {
+    expect(validateParams({ userId: 'u1', excludeIds: 'promo-1' }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', excludeIds: [1, 2] }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', excludeIds: [{ id: 'x' }] }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', excludeIds: [null] }).ok).toBe(false);
+  });
+
+  it('rejects an empty-string element in excludeIds', () => {
+    const result = validateParams({ userId: 'u1', excludeIds: ['ok', ''] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/excludeIds/);
+  });
+
+  it('rejects an excludeIds element longer than 64 characters', () => {
+    expect(validateParams({ userId: 'u1', excludeIds: ['a'.repeat(65)] }).ok).toBe(false);
+    // 64 chars is the inclusive maximum.
+    expect(validateParams({ userId: 'u1', excludeIds: ['a'.repeat(64)] }).ok).toBe(true);
+  });
+
+  it('rejects more than 50 excludeIds elements', () => {
+    const fifty = Array.from({ length: 50 }, (_, i) => `id-${i}`);
+    expect(validateParams({ userId: 'u1', excludeIds: fifty }).ok).toBe(true);
+    const result = validateParams({ userId: 'u1', excludeIds: [...fifty, 'one-more'] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/excludeIds/);
+  });
+
+  it('accepts an empty excludeIds array (no-op filter)', () => {
+    const result = validateParams({ userId: 'u1', excludeIds: [] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.excludeIds).toEqual([]);
+  });
 });

@@ -252,6 +252,35 @@ describe('handleSelectPromo', () => {
     expect(noFilter).toMatchObject({ status: 'ok', data: { id: 'top-1', format: 'topline' } });
   });
 
+  it('params.excludeIds skips excluded promos before the checkers run', async () => {
+    // Client-side session-seen list: [a, b] with a excluded → b is served even
+    // though a passes every checker (exclusion happens BEFORE the checker walk).
+    const a = makePromo({ id: 'a', title: 'A' });
+    const b = makePromo({ id: 'b', title: 'B' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'ex-1', excludeIds: ['a'] }, deps({ configService }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'b' } });
+  });
+
+  it('params.excludeIds covering the whole queue yields skipped/no_promo', async () => {
+    const a = makePromo({ id: 'a' });
+    const b = makePromo({ id: 'b' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'ex-2', excludeIds: ['a', 'b'] }, deps({ configService }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('empty excludeIds is a no-op (head of queue wins)', async () => {
+    const a = makePromo({ id: 'a' });
+    const b = makePromo({ id: 'b' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'ex-3', excludeIds: [] }, deps({ configService }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'a' } });
+  });
+
   it('seller gate: shows a seller promo only to users with active listings', async () => {
     const promo = makePromo({ id: 'seller-only', sellerStatus: 'seller' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
