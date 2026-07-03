@@ -2,7 +2,7 @@
 
 export type SubscriptionLevel = 'none' | 'plus' | 'premium';
 
-export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep';
+export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep' | 'custom';
 
 export interface PromoTargeting {
   minAge?: number;
@@ -35,6 +35,11 @@ export interface Promo {
   afterPromoId?: string;
   /** Display format for the renderer. */
   format: PromoFormat;
+  /** Custom format only: picks the host-owned render function via the
+   *  <PromoProvider customFormats> map (keyed by this variant). A renderable
+   *  field: select-promo hands it to the client untouched (NOT in the handle.ts
+   *  server-only strip list). Ignored by every other format. */
+  variant?: string;
   /** User-facing headline. */
   title: string;
   description?: string;

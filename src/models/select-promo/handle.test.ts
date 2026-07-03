@@ -168,6 +168,16 @@ describe('handleSelectPromo', () => {
     });
   });
 
+  it('hands custom-format variant to the client (variant is renderable, NOT server-only)', async () => {
+    const ad = makePromo({ id: 'cst-1', format: 'custom', title: 'Onboarding', variant: 'reklama-onboarding' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result).toEqual({
+      status: 'ok',
+      data: { id: 'cst-1', format: 'custom', title: 'Onboarding', variant: 'reklama-onboarding' },
+    });
+  });
+
   it('uses the named queue from params.queue', async () => {
     let capturedName: string | undefined;
     const configService = fakeConfigService({
