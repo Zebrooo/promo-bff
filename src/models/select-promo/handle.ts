@@ -7,7 +7,7 @@ import type { CheckerStatsService } from '../../services/checker-stats';
 import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
-import type { ModelResult, SelectPromoParams } from './types';
+import type { Advertisement, ModelResult, SelectPromoParams } from './types';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -29,6 +29,41 @@ export interface SelectPromoDeps {
   selectionTrace?: SelectionTraceService;
   /** Injectable clock for deterministic tests; defaults to real time. */
   now?: () => Date;
+}
+
+/**
+ * Strip a Promo to the renderable Advertisement (server-only selection fields
+ * removed). Shared by handleSelectPromo + handleSelectPromoList so the strip
+ * can't drift from the Advertisement Omit.
+ */
+export function stripToAdvertisement(promo: Promo): Advertisement {
+  const { name, startsAt, endsAt, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
+  return ad;
+}
+
+/**
+ * Fold a selection trace into the aggregate (promo_checker_stats) + write the
+ * per-request row (promo_selection_traces) + debug-log it. Shared by both
+ * handlers so the observability wiring can't drift.
+ */
+export function recordTraceObservability(
+  deps: SelectPromoDeps,
+  queueName: string,
+  params: SelectPromoParams,
+  trace: SelectionTrace,
+): void {
+  deps.checkerStats?.recordSelection(queueName, trace);
+  deps.selectionTrace?.record({
+    userId: params.userId,
+    queue: queueName,
+    device: params.device,
+    section: params.context?.section,
+    category: params.context?.category,
+    formats: params.formats,
+    excludeIds: params.excludeIds,
+    trace,
+  });
+  deps.logger?.debug?.({ trace: { queue: queueName, ...trace } }, 'promo selection trace');
 }
 
 /**
@@ -93,24 +128,9 @@ export async function handleSelectPromo(
   }
 
   // Observability: fold the per-checker verdicts into the minute-bucket counters
-  // (flushed to promo_checker_stats → Grafana) and keep the FULL trace in the
-  // debug log — invisible at the default level, one LOG_LEVEL=debug away.
-  if (trace) {
-    deps.checkerStats?.recordSelection(queueName, trace);
-    // Per-request row: same trace, but keyed by userId + the request's exclude/
-    // surface context, so a specific "почему юзеру X не показалось" is queryable.
-    deps.selectionTrace?.record({
-      userId: params.userId,
-      queue: queueName,
-      device: params.device,
-      section: params.context?.section,
-      category: params.context?.category,
-      formats: params.formats,
-      excludeIds: params.excludeIds,
-      trace,
-    });
-    logger?.debug?.({ trace: { queue: queueName, ...trace } }, 'promo selection trace');
-  }
+  // (promo_checker_stats → Grafana) + the per-request row (promo_selection_traces)
+  // + the FULL trace in the debug log (one LOG_LEVEL=debug away).
+  if (trace) recordTraceObservability(deps, queueName, params, trace);
 
   if (!promo) {
     // Same client answer either way (reason kept stable for consumers), but the
@@ -124,6 +144,5 @@ export async function handleSelectPromo(
   }
 
   // Hand back the whole promo, minus server-only selection fields.
-  const { name, startsAt, endsAt, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
-  return { status: 'ok', data: ad };
+  return { status: 'ok', data: stripToAdvertisement(promo) };
 }

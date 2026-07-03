@@ -66,3 +66,14 @@ export type ModelResult =
   | { status: 'ok'; data: Advertisement }
   | { status: 'skipped'; reason: string }
   | { status: 'error'; reason: string };
+
+/**
+ * select-promo-list result: the WHOLE ordered, eligibility-filtered sequence in
+ * one response (onboarding tour). Same envelope policy as ModelResult (HTTP 200;
+ * status distinguishes an empty tour from a dependency failure). Kept NEXT TO
+ * ModelResult — not merged into it — so the generic /models envelope is untouched.
+ */
+export type PromoListResult =
+  | { status: 'ok'; steps: Advertisement[] }
+  | { status: 'skipped'; reason: string }
+  | { status: 'error'; reason: string };

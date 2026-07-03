@@ -19,6 +19,8 @@ import { createCampaignService } from './services/campaign-service';
 import { createBalanceService } from './services/balance-service';
 import { isModelName, modelRegistry } from './models/registry';
 import type { SelectPromoDeps } from './models/select-promo/handle';
+import { handleSelectPromoList } from './models/select-promo/handle-list';
+import { validateParams as validateSelectPromoParams } from './models/select-promo/validate';
 import type { ModelResult } from './models/select-promo/types';
 import { handleAuction, type AuctionDeps } from './models/auction/handle';
 import { handleFeedFill, type FeedFillDeps } from './models/auction/feed-fill';
@@ -370,6 +372,27 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(200).send(result); // 200-envelope; consumer treats non-array as empty
     }
     return reply.code(200).send(result.data);
+  });
+
+  // Onboarding tour: the WHOLE ordered, eligibility-filtered sequence in one call
+  // ({ status, steps }), played by the storefront as a client cursor. Sibling of
+  // /auction — same service-ticket auth + 200-envelope policy — so the generic
+  // /models envelope + modelRegistry stay untouched. Reuses select-promo's params
+  // validator (userId/queue/device/skipCheckers) and the shared SelectPromoDeps.
+  app.post('/promo-list', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+
+    const validation = validateSelectPromoParams(request.body ?? {});
+    if (!validation.ok) {
+      return reply.code(400).send({ error: 'bad_request', reason: validation.error });
+    }
+
+    // Full envelope so the consumer can tell ok (steps) from skipped/error (→ []).
+    const result = await handleSelectPromoList(validation.params, deps);
+    return reply.code(200).send(result);
   });
 
   // AI-assisted promo rewriter. Cabinet sends { advertiserId, draft }; we

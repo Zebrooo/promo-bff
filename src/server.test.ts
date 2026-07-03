@@ -231,6 +231,38 @@ describe('POST /auction', () => {
   });
 });
 
+describe('POST /promo-list (onboarding tour)', () => {
+  const postList = (
+    app: ReturnType<typeof buildServer>,
+    payload: unknown,
+    headers: Record<string, string> = AUTH,
+  ) => app.inject({ method: 'POST', url: '/promo-list', headers, payload: payload as object });
+
+  it('returns 401 when not authorized', async () => {
+    const app = buildServer({ logger: false });
+    const res = await postList(app, { userId: 'u1' }, {});
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns the whole ordered tour as { status: "ok", steps }', async () => {
+    const promos = [makePromo({ id: 'intro' }), makePromo({ id: 's1' }), makePromo({ id: 's2' })];
+    const app = buildServer({ logger: false, deps: fakeConfig(promos) });
+    const res = await postList(app, { userId: 'u1', queue: 'cabinet-onboarding' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('ok');
+    expect(res.json().steps.map((s: { id: string }) => s.id)).toEqual(['intro', 's1', 's2']);
+    await app.close();
+  });
+
+  it('rejects a request without a userId (400)', async () => {
+    const app = buildServer({ logger: false });
+    const res = await postList(app, {});
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
 describe('POST /impressions routing (campaign vs house)', () => {
   function spies() {
     const recordCampaignImpression = vi.fn(async () => {});

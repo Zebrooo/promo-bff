@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { selectPromo, WEB_CHECKERS, type SelectionTrace } from './index';
+import { selectPromo, selectPromoList, WEB_CHECKERS, type SelectionTrace } from './index';
 import { __clearUserDataCache, type SupplierDeps } from './checkers/suppliers';
 import { makePromo } from '../test-utils';
 
@@ -178,5 +178,56 @@ describe('selectPromo trace (onTrace)', () => {
       },
     });
     expect(result?.id).toBe('a');
+  });
+});
+
+describe('selectPromoList', () => {
+  it('returns ALL passing promos in queue order (not just the first)', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'a' }), makePromo({ id: 'b' }), makePromo({ id: 'c' })];
+    const result = await selectPromoList(promos, ctx, { deps: makeDeps() });
+    expect(result.map((p) => p.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops a checker-blocked promo but keeps the rest, in order', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'a' }), makePromo({ id: 'blocked', cooldownHours: 24 }), makePromo({ id: 'c' })];
+    const deps = makeDeps({ lastShownAt: { blocked: '2024-06-01T11:00:00.000Z' } });
+    const result = await selectPromoList(promos, ctx, { deps });
+    expect(result.map((p) => p.id)).toEqual(['a', 'c']);
+  });
+
+  it('returns [] when the queue is empty', async () => {
+    expect(await selectPromoList([], ctx, { deps: makeDeps() })).toEqual([]);
+  });
+
+  it('skip removes a checker so a blocked promo is included', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'blocked', cooldownHours: 24 })];
+    const deps = makeDeps({ lastShownAt: { blocked: '2024-06-01T11:00:00.000Z' } });
+    const result = await selectPromoList(promos, ctx, { deps, skip: ['cooldown'] });
+    expect(result.map((p) => p.id)).toEqual(['blocked']);
+  });
+
+  it('excludeIds drops promos BEFORE the walk', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'a' }), makePromo({ id: 'b' }), makePromo({ id: 'c' })];
+    const result = await selectPromoList(promos, { ...ctx, excludeIds: ['b'] }, { deps: makeDeps() });
+    expect(result.map((p) => p.id)).toEqual(['a', 'c']);
+  });
+
+  it('emits ONE trace: selectedPromoIds = every included id; candidates = every evaluated id', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    const promos = [
+      makePromo({ id: 'a' }),
+      makePromo({ id: 'blocked', endsAt: '2000-01-01T00:00:00.000Z' }),
+      makePromo({ id: 'c' }),
+    ];
+    const result = await selectPromoList(promos, ctx, { deps: makeDeps(), onTrace: (t) => traces.push(t) });
+    expect(result.map((p) => p.id)).toEqual(['a', 'c']);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].selectedPromoIds).toEqual(['a', 'c']);
+    expect(traces[0].candidates.map((c) => c.promoId)).toEqual(['a', 'blocked', 'c']);
   });
 });
