@@ -4,6 +4,7 @@ import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
 import type { CheckerStatsService } from '../../services/checker-stats';
+import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import type { ModelResult, SelectPromoParams } from './types';
@@ -24,6 +25,8 @@ export interface SelectPromoDeps {
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
+  /** Per-request trace sink (promo_selection_traces, userId-level drill-down). Optional: absent in tests. */
+  selectionTrace?: SelectionTraceService;
   /** Injectable clock for deterministic tests; defaults to real time. */
   now?: () => Date;
 }
@@ -94,6 +97,18 @@ export async function handleSelectPromo(
   // debug log — invisible at the default level, one LOG_LEVEL=debug away.
   if (trace) {
     deps.checkerStats?.recordSelection(queueName, trace);
+    // Per-request row: same trace, but keyed by userId + the request's exclude/
+    // surface context, so a specific "почему юзеру X не показалось" is queryable.
+    deps.selectionTrace?.record({
+      userId: params.userId,
+      queue: queueName,
+      device: params.device,
+      section: params.context?.section,
+      category: params.context?.category,
+      formats: params.formats,
+      excludeIds: params.excludeIds,
+      trace,
+    });
     logger?.debug?.({ trace: { queue: queueName, ...trace } }, 'promo selection trace');
   }
 

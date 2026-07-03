@@ -12,6 +12,7 @@ import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
 import { createCheckerStatsService, type CheckerStatsService } from './services/checker-stats';
+import { createSelectionTraceService, type SelectionTraceService } from './services/selection-trace';
 import { withTimeout } from './util/with-timeout';
 import { createListingService } from './services/listing-service';
 import { createCampaignService } from './services/campaign-service';
@@ -114,6 +115,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     await checkerStats.stop();
   });
 
+  // Per-request selection trace — one row per select-promo walk with userId +
+  // excludeIds + the full per-checker verdicts (promo_selection_traces on the AA
+  // Supabase, Grafana "Трейс запроса" drill-down). Complements the anonymous
+  // checker-stats aggregate. No-op when AA is unconfigured (dev/tests).
+  const selectionTrace: SelectionTraceService = opts.deps?.selectionTrace ?? createSelectionTraceService({ logger: app.log });
+  selectionTrace.start();
+  app.addHook('onClose', async () => {
+    await selectionTrace.stop();
+  });
+
   const deps: SelectPromoDeps = {
     configService: createConfigService(app.log),
     userService: createUserService(),
@@ -121,6 +132,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     impressionStore: createImpressionStore(),
     listingService: createListingService(),
     checkerStats,
+    selectionTrace,
     logger: app.log,
     ...opts.deps,
   };
