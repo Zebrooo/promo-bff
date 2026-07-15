@@ -548,16 +548,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const sellerBonusKopecks = Number(b.sellerBonusKopecks);
     const dailyInviteCap = Number(b.dailyInviteCap);
     const holdHours = Number(b.holdHours);
+    const dailyBudgetKopecks = Number(b.dailyBudgetKopecks);
     if (
       !Number.isInteger(inviterCreditKopecks) || inviterCreditKopecks < 0 ||
       !Number.isInteger(sellerBonusKopecks) || sellerBonusKopecks < 0 ||
       !Number.isInteger(dailyInviteCap) || dailyInviteCap <= 0 ||
-      !Number.isInteger(holdHours) || holdHours < 0
+      !Number.isInteger(holdHours) || holdHours < 0 ||
+      !Number.isInteger(dailyBudgetKopecks) || dailyBudgetKopecks < 0
     ) {
       return reply.code(400).send({ error: 'bad_request', reason: 'invalid referral config fields' });
     }
     try {
-      await referralConfigService.sync({ active, inviterCreditKopecks, sellerBonusKopecks, dailyInviteCap, holdHours });
+      await referralConfigService.sync({ active, inviterCreditKopecks, sellerBonusKopecks, dailyInviteCap, holdHours, dailyBudgetKopecks });
     } catch (err) {
       app.log.error({ err }, 'POST /referral-config/sync: upsert failed');
       return reply.code(502).send({ error: 'referral_config_unavailable' });

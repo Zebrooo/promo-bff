@@ -27,6 +27,11 @@ export interface ReferralConfigPayload {
   sellerBonusKopecks: number;
   dailyInviteCap: number;
   holdHours: number;
+  /** referral_config.daily_budget_kopecks — bigint kopecks, DB default
+   *  100000 (1000₽/day). Always sent by the cabinet (defaults there too),
+   *  kept here as a required field so a missing value fails loudly instead
+   *  of silently upserting a stale/zero budget. */
+  dailyBudgetKopecks: number;
 }
 
 export interface ReferralConfigService {
@@ -68,6 +73,7 @@ export function createReferralConfigService(cfg: SupabaseConfig = config.aaSupab
         seller_bonus_kopecks: p.sellerBonusKopecks,
         daily_invite_cap: p.dailyInviteCap,
         hold_hours: p.holdHours,
+        daily_budget_kopecks: p.dailyBudgetKopecks,
         updated_at: new Date().toISOString(),
       }),
     });

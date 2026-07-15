@@ -487,6 +487,7 @@ describe('POST /referral-config/sync', () => {
     sellerBonusKopecks: 20000,
     dailyInviteCap: 5,
     holdHours: 72,
+    dailyBudgetKopecks: 100000,
   };
 
   it('returns 401 when not authorized', async () => {
@@ -502,6 +503,8 @@ describe('POST /referral-config/sync', () => {
     expect((await postSync(app, { ...validPayload, sellerBonusKopecks: 1.5 })).statusCode).toBe(400);
     expect((await postSync(app, { ...validPayload, dailyInviteCap: 0 })).statusCode).toBe(400);
     expect((await postSync(app, { ...validPayload, holdHours: -1 })).statusCode).toBe(400);
+    expect((await postSync(app, { ...validPayload, dailyBudgetKopecks: -1 })).statusCode).toBe(400);
+    expect((await postSync(app, { ...validPayload, dailyBudgetKopecks: 1.5 })).statusCode).toBe(400);
     await app.close();
   });
 

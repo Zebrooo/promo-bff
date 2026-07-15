@@ -9,6 +9,7 @@ const samplePayload: ReferralConfigPayload = {
   sellerBonusKopecks: 20000,
   dailyInviteCap: 5,
   holdHours: 72,
+  dailyBudgetKopecks: 100000,
 };
 
 afterEach(() => {
@@ -47,6 +48,7 @@ describe('createReferralConfigService (Supabase)', () => {
       seller_bonus_kopecks: 20000,
       daily_invite_cap: 5,
       hold_hours: 72,
+      daily_budget_kopecks: 100000,
     });
     expect(typeof body.updated_at).toBe('string');
   });
