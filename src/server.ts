@@ -10,6 +10,7 @@ import { createImpressionStore } from './services/impression-store';
 import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
+import { createReferralConfigService, type ReferralConfigService } from './services/referral-config-service';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
 import { createCheckerStatsService, type CheckerStatsService } from './services/checker-stats';
 import { createSelectionTraceService, type SelectionTraceService } from './services/selection-trace';
@@ -51,7 +52,13 @@ export interface BuildServerOptions {
       AuctionDeps &
       EnhanceDeps &
       EnhanceBannerImageDeps &
-      { chargeService: ChargeService; eventStore: EventStore; analyticsStore: AnalyticsStore; errorStore: ErrorStore }
+      {
+        chargeService: ChargeService;
+        eventStore: EventStore;
+        analyticsStore: AnalyticsStore;
+        errorStore: ErrorStore;
+        referralConfigService: ReferralConfigService;
+      }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
   logger?: boolean;
@@ -218,6 +225,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Error sink — writes to abkhaz-auto Supabase (error_events). No-op when unconfigured.
   const errorStore: ErrorStore = opts.deps?.errorStore ?? createErrorStore();
+
+  // Referral-config mirror — upserts abkhaz-auto Supabase referral_config
+  // (id=1) whenever the cabinet saves its referral-invite custom promo.
+  // No-op when AA Supabase is unconfigured (dev/tests).
+  const referralConfigService: ReferralConfigService =
+    opts.deps?.referralConfigService ?? createReferralConfigService();
 
   // Global capture: log (existing behavior) + record to error_events. Only fires on
   // UNHANDLED throws inside handlers (per-route 502s return before throwing).
@@ -512,6 +525,42 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     } catch (err) {
       app.log.error({ err }, 'POST /errors: error store write failed');
       return reply.code(502).send({ error: 'error_store_unavailable' });
+    }
+    return reply.code(200).send({ ok: true });
+  });
+
+  // Referral-config mirror. The cabinet's referral-invite custom promo is a
+  // config-only promo (nothing renders on the storefront) — its fields must
+  // additionally land in abkhaz-Supabase's referral_config singleton (id=1),
+  // which only the BFF can reach. Called by the cabinet's server-side
+  // /api/referral-config/sync route AFTER the promo is already durably saved
+  // to its own S3 pool, so a failure here is reported as a 502 but the
+  // cabinet treats it as best-effort (see promo-cabinet's route doc) — it
+  // does not roll back or retry the S3 save.
+  app.post('/referral-config/sync', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+    const b = (request.body ?? {}) as Record<string, unknown>;
+    const active = Boolean(b.active);
+    const inviterCreditKopecks = Number(b.inviterCreditKopecks);
+    const sellerBonusKopecks = Number(b.sellerBonusKopecks);
+    const dailyInviteCap = Number(b.dailyInviteCap);
+    const holdHours = Number(b.holdHours);
+    if (
+      !Number.isInteger(inviterCreditKopecks) || inviterCreditKopecks < 0 ||
+      !Number.isInteger(sellerBonusKopecks) || sellerBonusKopecks < 0 ||
+      !Number.isInteger(dailyInviteCap) || dailyInviteCap <= 0 ||
+      !Number.isInteger(holdHours) || holdHours < 0
+    ) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'invalid referral config fields' });
+    }
+    try {
+      await referralConfigService.sync({ active, inviterCreditKopecks, sellerBonusKopecks, dailyInviteCap, holdHours });
+    } catch (err) {
+      app.log.error({ err }, 'POST /referral-config/sync: upsert failed');
+      return reply.code(502).send({ error: 'referral_config_unavailable' });
     }
     return reply.code(200).send({ ok: true });
   });

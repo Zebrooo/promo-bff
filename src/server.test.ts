@@ -474,6 +474,59 @@ describe('POST /events', () => {
   });
 });
 
+describe('POST /referral-config/sync', () => {
+  const postSync = (
+    app: ReturnType<typeof buildServer>,
+    payload: unknown,
+    headers: Record<string, string> = AUTH,
+  ) => app.inject({ method: 'POST', url: '/referral-config/sync', headers, payload: payload as object });
+
+  const validPayload = {
+    active: true,
+    inviterCreditKopecks: 50000,
+    sellerBonusKopecks: 20000,
+    dailyInviteCap: 5,
+    holdHours: 72,
+  };
+
+  it('returns 401 when not authorized', async () => {
+    const app = buildServer({ logger: false });
+    const res = await postSync(app, validPayload, {});
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns 400 on non-integer/negative fields', async () => {
+    const app = buildServer({ logger: false });
+    expect((await postSync(app, { ...validPayload, inviterCreditKopecks: -1 })).statusCode).toBe(400);
+    expect((await postSync(app, { ...validPayload, sellerBonusKopecks: 1.5 })).statusCode).toBe(400);
+    expect((await postSync(app, { ...validPayload, dailyInviteCap: 0 })).statusCode).toBe(400);
+    expect((await postSync(app, { ...validPayload, holdHours: -1 })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('upserts the payload and returns { ok: true }', async () => {
+    const calls: unknown[] = [];
+    const referralConfigService = { sync: async (p: unknown) => { calls.push(p); } };
+    const app = buildServer({ logger: false, deps: { referralConfigService } });
+    const res = await postSync(app, validPayload);
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ ok: true });
+    expect(calls).toEqual([validPayload]);
+    await app.close();
+  });
+
+  it('returns 502 (best-effort failure) when the upsert throws', async () => {
+    const referralConfigService = {
+      sync: async () => { throw new Error('aa-supabase down'); },
+    };
+    const app = buildServer({ logger: false, deps: { referralConfigService } });
+    const res = await postSync(app, validPayload);
+    expect(res.statusCode).toBe(502);
+    await app.close();
+  });
+});
+
 describe('Analytics routes', () => {
   // Базовый stub'нутый analytics-store, переопределяется per-тест через spread.
   function makeStore(overrides: Partial<AnalyticsStore> = {}): AnalyticsStore {
