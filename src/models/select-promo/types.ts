@@ -29,7 +29,7 @@ export interface SelectPromoParams {
    * to the next eligible promo). Omitted = no device filtering (back-compat;
    * gating then stays client-side in the renderer).
    */
-  device?: 'desktop' | 'touch';
+  device?: 'desktop' | 'touch' | 'app';
   /**
    * Promo ids to exclude from selection (dropped BEFORE the checkers run).
    * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past
