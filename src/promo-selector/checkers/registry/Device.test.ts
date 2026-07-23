@@ -44,4 +44,21 @@ describe('DeviceChecker', () => {
       }
     });
   });
+
+  describe("'app' device (WebView) — treated as touch-family", () => {
+    it('drops desktop-only formats on app', () => {
+      expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ format: 'topline' }) }))).toBe(false);
+      expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ format: 'tooltip', anchor: 'a1' }) }))).toBe(false);
+    });
+    it('allows touch-capable formats on app', () => {
+      for (const format of ['inline', 'popup', 'fullscreen', 'divkit'] as const) {
+        expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ format }) }))).toBe(true);
+      }
+    });
+    it("app matches a 'touch' advertiser deviceTarget, not 'desktop'", () => {
+      expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ deviceTarget: 'touch' }) }))).toBe(true);
+      expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ deviceTarget: 'desktop' }) }))).toBe(false);
+      expect(c.check(makeCheckContext({ device: 'app', promo: makePromo({ deviceTarget: 'both' }) }))).toBe(true);
+    });
+  });
 });

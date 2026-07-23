@@ -50,7 +50,7 @@ export interface SelectPromoContext {
   section?: string;
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
-  device?: 'desktop' | 'touch';
+  device?: 'desktop' | 'touch' | 'app';
   /** Formats the requesting surface accepts; gates promos by format. Undefined/empty = no filter. */
   formats?: string[];
   /** Promo ids to drop from the queue BEFORE the checkers run. Undefined/empty = no exclusion. */

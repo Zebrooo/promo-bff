@@ -27,12 +27,15 @@ export class DeviceChecker extends Checker {
   }
   check(ctx: CheckContext): boolean {
     const { deviceTarget, format } = ctx.promo;
+    // Приложение (WebView) — touch-поверхность: у deviceTarget нет отдельного
+    // значения 'app', так что для гейтов трактуем 'app' как 'touch'-семью.
+    const family = ctx.device === 'app' ? 'touch' : ctx.device;
     // 1. Explicit advertiser device gate.
-    if (deviceTarget !== undefined && deviceTarget !== 'both' && deviceTarget !== ctx.device) {
+    if (deviceTarget !== undefined && deviceTarget !== 'both' && deviceTarget !== family) {
       return false;
     }
-    // 2. Format capability gate: a touch device can't render desktop-only formats.
-    if (ctx.device === 'touch' && DESKTOP_ONLY_FORMATS.has(format)) {
+    // 2. Format capability gate: touch/app can't render desktop-only formats.
+    if (family === 'touch' && DESKTOP_ONLY_FORMATS.has(format)) {
       return false;
     }
     return true;

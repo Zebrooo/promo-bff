@@ -109,8 +109,8 @@ export function validateParams(params: unknown): ValidationResult {
   }
 
   if (p.device !== undefined) {
-    if (p.device !== 'desktop' && p.device !== 'touch') {
-      return { ok: false, error: "params.device must be 'desktop' or 'touch'" };
+    if (p.device !== 'desktop' && p.device !== 'touch' && p.device !== 'app') {
+      return { ok: false, error: "params.device must be 'desktop', 'touch' or 'app'" };
     }
     result.device = p.device;
   }

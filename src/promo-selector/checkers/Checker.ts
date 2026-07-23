@@ -11,7 +11,7 @@ export interface CheckContext {
   /** Page category the user is browsing. */
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
-  device?: 'desktop' | 'touch';
+  device?: 'desktop' | 'touch' | 'app';
   /**
    * Acceptable creative formats for the requesting surface (e.g. ['topline'] for
    * the top banner, ['popup','fullscreen','inline','divkit'] for the overlay).
