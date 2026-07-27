@@ -1,0 +1,65 @@
+name: promo-bff
+
+# Отдельный compose-проект: исходники BFF живут в своём репозитории, поэтому
+# он не вписан в compose витрины. Связь между ними — через ВНЕШНЮЮ сеть `web`,
+# в которой уже стоят web-blue/web-green.
+#
+# ГЛАВНОЕ: секции `ports:` здесь НЕТ и быть не должно. Сервис доступен только
+# по имени контейнера внутри docker-сети — на хосте он не занимает порт, а
+# Traefik к нему не подключается (traefik.enable=false). Снаружи его нет вовсе:
+# это и есть цель переезда — убрать рекламный бэкенд из публичного интернета,
+# а не «закрыть файрволом».
+
+services:
+  promo-bff:
+    container_name: promo-bff
+    image: promo-bff:latest
+    build:
+      context: .
+      secrets:
+        - node_auth_token
+    restart: always
+    env_file:
+      # Переносится с eremin.site как есть: S3, два проекта Supabase,
+      # OpenRouter, ключ подписи служебных тикетов.
+      - .env
+    networks:
+      # web — общая с витриной: она зовёт http://promo-bff:3191
+      - web
+      # supabase-aa_default — локальная база прода (AA_SUPABASE_*); без неё
+      # BFF пойдёт в неё через публичный адрес и упрётся в тот же интернет,
+      # от которого мы уходим.
+      - supabase-aa
+    labels:
+      - traefik.enable=false
+    healthcheck:
+      # /feed-fill без служебного тикета обязан отдать 401 — это и есть признак
+      # живости: процесс поднялся И авторизация тикетов включена. 200 здесь
+      # означал бы, что fail-closed сломан и сервис пускает кого попало.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3191/feed-fill',{method:'POST'}).then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # tsx транспилирует на старте — до первого ответа ~50 с. Без запаса
+      # контейнер уходил бы в unhealthy на каждом рестарте.
+      start_period: 90s
+    stop_grace_period: 20s
+    logging:
+      # Тот же лимит, что у витрины: json-file по умолчанию не ротирует вообще
+      # и растёт, пока не кончится диск.
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
+networks:
+  web:
+    external: true
+  supabase-aa:
+    external: true
+    name: supabase-aa_default
+
+secrets:
+  node_auth_token:
+    environment: NODE_AUTH_TOKEN
