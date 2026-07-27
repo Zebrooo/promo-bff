@@ -23,6 +23,12 @@ services:
       # Переносится с eremin.site как есть: S3, два проекта Supabase,
       # OpenRouter, ключ подписи служебных тикетов.
       - .env
+    environment:
+      # PORT на eremin.site задавался НЕ в .env, а в systemd-юните
+      # (Environment=PORT=3191) — при переносе одного лишь .env сервис молча
+      # уходил на дефолт 3000 (src/config.ts:103). Держим явно здесь, иначе
+      # витрина будет стучаться в закрытую дверь.
+      PORT: "3191"
     networks:
       # web — общая с витриной: она зовёт http://promo-bff:3191
       - web
