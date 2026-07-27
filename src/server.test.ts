@@ -531,25 +531,11 @@ describe('POST /referral-config/sync', () => {
 });
 
 describe('Analytics routes', () => {
-  // Базовый stub'нутый analytics-store, переопределяется per-тест через spread.
+  // После чистки 2026-07-27 из десятка /analytics/* ручек остался один
+  // таймлайн (см. комментарий в server.ts). Стаб — только он.
   function makeStore(overrides: Partial<AnalyticsStore> = {}): AnalyticsStore {
     return {
-      getKpi: async () => ({ dau: 0, wau: 0, mau: 0, events_today: 0, events_7d: 0, events_total: 0 }),
-      getTop: async () => [],
-      getFunnel: async () => [],
-      getDaily: async () => [],
-      getPromoTop: async () => [],
-      getPromoZero: async () => [],
-      getPromoFunnelByFormat: async () => [],
       getPromoTimeline: async () => [],
-      getOnboardingOverview: async () => ({
-        welcome_shown: 0, welcome_skipped: 0,
-        role_picked: 0, role_buyer: 0, role_seller: 0,
-        completed: 0, completed_finished: 0, completed_autoskip: 0,
-        skipped_explicit: 0, auto_skipped_steps: 0, restarted: 0,
-        step_shown_total: 0, step_next_total: 0,
-      }),
-      getOnboardingFunnel: async () => [],
       ...overrides,
     };
   }
@@ -560,126 +546,44 @@ describe('Analytics routes', () => {
     headers: Record<string, string> = AUTH,
   ) => app.inject({ method: 'POST', url, headers, payload: payload as object });
 
-  it('/analytics/kpi — 401 без ticket, 200 с данными', async () => {
+  it('/analytics/promos/timeline — 401 без ticket, 400 без promo_id, 200 с rows', async () => {
+    const calls: Array<[string, number]> = [];
     const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getKpi: async () => ({ dau: 5, wau: 30, mau: 100, events_today: 42, events_7d: 280, events_total: 9999 }),
+      getPromoTimeline: async (id, days) => { calls.push([id, days]); return [{ day: '2026-07-01', views: 5, views_visible: 4, cta_clicks: 1 }]; },
     }) } });
-    expect((await POSTS(app, '/analytics/kpi', {}, {})).statusCode).toBe(401);
-    const ok = await POSTS(app, '/analytics/kpi', {});
-    expect(ok.statusCode).toBe(200);
-    expect(body(ok)).toEqual({ dau: 5, wau: 30, mau: 100, events_today: 42, events_7d: 280, events_total: 9999 });
-    await app.close();
-  });
-
-  it('/analytics/top — пробрасывает days+limit, по умолчанию 7/25', async () => {
-    const calls: Array<[number, number]> = [];
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getTop: async (days, limit) => { calls.push([days, limit]); return []; },
-    }) } });
-    await POSTS(app, '/analytics/top', {}); // defaults
-    await POSTS(app, '/analytics/top', { days: 14, limit: 10 });
-    await POSTS(app, '/analytics/top', { days: 9999, limit: -5 }); // out of range → defaults
-    expect(calls).toEqual([[7, 25], [14, 10], [7, 25]]);
-    await app.close();
-  });
-
-  it('/analytics/daily — clamp days 1..365, default 30', async () => {
-    const calls: number[] = [];
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getDaily: async (days) => { calls.push(days); return []; },
-    }) } });
-    await POSTS(app, '/analytics/daily', {});
-    await POSTS(app, '/analytics/daily', { days: 90 });
-    await POSTS(app, '/analytics/daily', { days: 0 }); // → default 30
-    await POSTS(app, '/analytics/daily', { days: 366 }); // → default 30
-    expect(calls).toEqual([30, 90, 30, 30]);
-    await app.close();
-  });
-
-  it('/analytics/funnel — требует non-empty string[]', async () => {
-    const calls: Array<[string[], number]> = [];
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getFunnel: async (events, days) => { calls.push([events, days]); return []; },
-    }) } });
-    expect((await POSTS(app, '/analytics/funnel', {})).statusCode).toBe(400);
-    expect((await POSTS(app, '/analytics/funnel', { events: [] })).statusCode).toBe(400);
-    expect((await POSTS(app, '/analytics/funnel', { events: ['a', 1] })).statusCode).toBe(400);
-    const ok = await POSTS(app, '/analytics/funnel', { events: ['a', 'b'], days: 14 });
-    expect(ok.statusCode).toBe(200);
-    expect(calls).toEqual([[['a', 'b'], 14]]);
-    await app.close();
-  });
-
-  it('/analytics/* — 502 когда store бросает (Supabase недоступен)', async () => {
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getKpi: async () => { throw new Error('aa down'); },
-      getDaily: async () => { throw new Error('aa down'); },
-    }) } });
-    expect((await POSTS(app, '/analytics/kpi', {})).statusCode).toBe(502);
-    expect((await POSTS(app, '/analytics/daily', {})).statusCode).toBe(502);
-    await app.close();
-  });
-
-  it('/analytics/promos/top + /zero — 200 с rows, default days=30 limit=25', async () => {
-    const topCalls: Array<[number, number]> = [];
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getPromoTop: async (d, l) => { topCalls.push([d, l]); return [
-        { promo_id: 'p1', title: 'P1', format: 'popup', views: 100, views_visible: 80, cta_clicks: 10, closes: 5, dismisses: 0, ctr_pct: 10 },
-      ]; },
-    }) } });
-    const res = await POSTS(app, '/analytics/promos/top', {});
-    expect(res.statusCode).toBe(200);
-    expect(body(res).rows).toHaveLength(1);
-    expect(topCalls).toEqual([[30, 25]]);
-    await app.close();
-  });
-
-  it('/analytics/promos/timeline — требует promo_id', async () => {
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore() } });
+    expect((await POSTS(app, '/analytics/promos/timeline', { promo_id: 'p1' }, {})).statusCode).toBe(401);
     expect((await POSTS(app, '/analytics/promos/timeline', {})).statusCode).toBe(400);
     expect((await POSTS(app, '/analytics/promos/timeline', { promo_id: '' })).statusCode).toBe(400);
-    expect((await POSTS(app, '/analytics/promos/timeline', { promo_id: 'p1' })).statusCode).toBe(200);
-    await app.close();
-  });
-
-  it('/analytics/onboarding/overview — 401/200, default days=30', async () => {
-    const calls: number[] = [];
-    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getOnboardingOverview: async (d) => {
-        calls.push(d);
-        return {
-          welcome_shown: 100, welcome_skipped: 30,
-          role_picked: 70, role_buyer: 50, role_seller: 20,
-          completed: 20, completed_finished: 18, completed_autoskip: 2,
-          skipped_explicit: 10, auto_skipped_steps: 40, restarted: 3,
-          step_shown_total: 500, step_next_total: 400,
-        };
-      },
-    }) } });
-    expect((await POSTS(app, '/analytics/onboarding/overview', {}, {})).statusCode).toBe(401);
-    const ok = await POSTS(app, '/analytics/onboarding/overview', {});
+    const ok = await POSTS(app, '/analytics/promos/timeline', { promo_id: 'p1', days: 14 });
     expect(ok.statusCode).toBe(200);
-    expect(body(ok).welcome_shown).toBe(100);
-    expect(calls).toEqual([30]);
+    expect(body(ok).rows).toHaveLength(1);
+    // days вне 1..365 схлопывается в default 30.
+    await POSTS(app, '/analytics/promos/timeline', { promo_id: 'p1', days: 9999 });
+    expect(calls).toEqual([['p1', 14], ['p1', 30]]);
     await app.close();
   });
 
-  it('/analytics/onboarding/funnel — clamp days, 502 на падение store', async () => {
-    const calls: number[] = [];
+  it('/analytics/promos/timeline — 502 когда store бросает (Supabase недоступен)', async () => {
     const app = buildServer({ logger: false, deps: { analyticsStore: makeStore({
-      getOnboardingFunnel: async (d) => { calls.push(d); return [
-        { step_id: 'u01-welcome', step_idx: 0, shown_count: 10, next_count: 8, auto_skipped_count: 0 },
-      ]; },
+      getPromoTimeline: async () => { throw new Error('down'); },
     }) } });
-    const r1 = await POSTS(app, '/analytics/onboarding/funnel', { days: 7 });
-    expect(r1.statusCode).toBe(200);
-    expect(body(r1).rows).toHaveLength(1);
-    expect(calls).toEqual([7]);
+    expect((await POSTS(app, '/analytics/promos/timeline', { promo_id: 'p1' })).statusCode).toBe(502);
+    await app.close();
+  });
 
-    // out-of-range days → clamp to 30
-    await POSTS(app, '/analytics/onboarding/funnel', { days: 9999 });
-    expect(calls).toEqual([7, 30]);
-
+  it('мёртвые /analytics/* ручки сняты — 404 даже с валидным тикетом', async () => {
+    // Регрессионный замок: агрегатные эндпоинты умерли вместе с дашбордами
+    // кабинета (инициатива «Метрика — единственный источник»). Если кто-то
+    // вернёт их «на всякий случай» — этот тест напомнит, что это осознанно
+    // снятая поверхность с service-role-доступом к БД, а не забытая фича.
+    const app = buildServer({ logger: false, deps: { analyticsStore: makeStore() } });
+    for (const url of [
+      '/analytics/kpi', '/analytics/top', '/analytics/daily', '/analytics/funnel',
+      '/analytics/promos/top', '/analytics/promos/zero', '/analytics/promos/funnel-by-format',
+      '/analytics/onboarding/overview', '/analytics/onboarding/funnel',
+    ]) {
+      expect((await POSTS(app, url, {})).statusCode, url).toBe(404);
+    }
     await app.close();
   });
 });
