@@ -114,31 +114,99 @@ describe('createAaAdminStore.setCanaryPct', () => {
 });
 
 describe('createAaAdminStore.createExperiment', () => {
+  const validVariants = [
+    { key: 'control', weight: 1, is_control: true },
+    { key: 'a', weight: 1, is_control: false },
+  ];
+
   it('rejects fewer than 2 variants without any fetch', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     const store = createAaAdminStore(cfg);
-    const result = await store.createExperiment({
-      key: 'my-exp',
-      title: 'T',
-      surface: 'client',
-      variants: [{ key: 'control', weight: 1, is_control: true }],
-    });
+    const result = await store.createExperiment(
+      {
+        key: 'my-exp',
+        title: 'T',
+        surface: 'client',
+        variants: [{ key: 'control', weight: 1, is_control: true }],
+      },
+      'promo-cabinet',
+    );
     expect(result.ok).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects a non-kebab key', async () => {
     const store = createAaAdminStore(cfg);
-    const result = await store.createExperiment({
-      key: 'Not Kebab!',
-      title: 'T',
-      surface: 'client',
-      variants: [
-        { key: 'control', weight: 1, is_control: true },
-        { key: 'a', weight: 1, is_control: false },
-      ],
-    });
+    const result = await store.createExperiment(
+      { key: 'Not Kebab!', title: 'T', surface: 'client', variants: validVariants },
+      'promo-cabinet',
+    );
     expect(result.ok).toBe(false);
+  });
+
+  it.each([NaN, Infinity])('rejects a non-finite variant weight=%s without any fetch', async (bad) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const store = createAaAdminStore(cfg);
+    const result = await store.createExperiment(
+      {
+        key: 'my-exp',
+        title: 'T',
+        surface: 'client',
+        variants: [{ key: 'control', weight: bad, is_control: true }, { key: 'a', weight: 1, is_control: false }],
+      },
+      'promo-cabinet',
+    );
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('maps a 23505 unique_violation to code:"key_exists" instead of a generic error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: '23505', message: 'duplicate key' }), { status: 409 }),
+    );
+    const store = createAaAdminStore(cfg);
+    const result = await store.createExperiment(
+      { key: 'my-exp', title: 'T', surface: 'client', variants: validVariants },
+      'promo-cabinet',
+    );
+    expect(result).toEqual({ ok: false, error: 'Ключ уже существует', code: 'key_exists' });
+  });
+
+  it('writes experiment_audit with actor:null and action prefixed by the caller service id', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 201 }));
+    const store = createAaAdminStore(cfg);
+    const result = await store.createExperiment(
+      { key: 'my-exp', title: 'T', surface: 'client', variants: validVariants },
+      'promo-cabinet',
+    );
+    expect(result).toEqual({ ok: true });
+    // writeAudit — fire-and-forget (не await'ится вызывающим кодом, см.
+    // комментарий в aa-admin-store.ts), так что запрос может ещё лежать в
+    // микротаск-очереди в момент, когда createExperiment уже вернулся.
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('experiment_audit'))).toBe(true);
+    });
+    const auditCall = fetchMock.mock.calls.find(([url]) => String(url).includes('experiment_audit'));
+    const sent = JSON.parse(String(auditCall?.[1]?.body));
+    expect(sent).toMatchObject({ experiment_key: 'my-exp', actor: null, action: 'promo-cabinet:create' });
+  });
+
+  it('does not fail the mutation when the audit write itself fails (fire-and-forget)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: string | URL) => {
+      if (String(url).includes('experiment_audit')) return new Response('nope', { status: 500 });
+      return new Response(null, { status: 201 });
+    }) as typeof fetch);
+    const store = createAaAdminStore(cfg);
+    const result = await store.createExperiment(
+      { key: 'my-exp', title: 'T', surface: 'client', variants: validVariants },
+      'promo-cabinet',
+    );
+    expect(result).toEqual({ ok: true });
+    // Регрессионный замок ровно на "fire-and-forget" свойство: мутация уже
+    // вернула ok:true ДО того, как аудит-запрос вообще успел провалиться —
+    // ждём, пока отложенный warn всё же случится.
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled());
   });
 });
 

@@ -733,6 +733,86 @@ describe('POST /aa-admin/*', () => {
     expect((await POSTS(app, '/aa-admin/canary/state', { env: 'prod' })).statusCode).toBe(503);
     await app.close();
   });
+
+  it('/aa-admin/experiments/create — 409 key_exists (не общий 400) когда store сигнализирует конфликт', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore(),
+          prod: makeAdminStore({
+            createExperiment: async () => ({ ok: false, error: 'Ключ уже существует', code: 'key_exists' }),
+          }),
+        },
+      },
+    });
+    const res = await POSTS(app, '/aa-admin/experiments/create', {
+      env: 'prod',
+      key: 'dup',
+      title: 'T',
+      surface: 'client',
+      variants: [{ key: 'control', weight: 1, is_control: true }, { key: 'a', weight: 1, is_control: false }],
+    });
+    expect(res.statusCode).toBe(409);
+    expect(body(res)).toEqual({ error: 'key_exists', reason: 'Ключ уже существует' });
+    await app.close();
+  });
+
+  it('/aa-admin/experiments/create — обычная валидационная ошибка (без code) остаётся 400', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore(),
+          prod: makeAdminStore({ createExperiment: async () => ({ ok: false, error: 'Минимум 2 варианта' }) }),
+        },
+      },
+    });
+    const res = await POSTS(app, '/aa-admin/experiments/create', {
+      env: 'prod',
+      key: 'my-exp',
+      title: 'T',
+      surface: 'client',
+      variants: [{ key: 'control', weight: 1, is_control: true }],
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('передаёт actor (clientId сервиса) во все мутирующие методы стора', async () => {
+    const createExperiment = vi.fn(async () => ({ ok: true as const }));
+    const patchExperiment = vi.fn(async () => ({ ok: true as const }));
+    const bumpSalt = vi.fn(async () => ({ ok: true as const }));
+    const renameVariant = vi.fn(async () => ({ ok: true as const }));
+    const saveVariantWeights = vi.fn(async () => ({ ok: true as const }));
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore(),
+          prod: makeAdminStore({ createExperiment, patchExperiment, bumpSalt, renameVariant, saveVariantWeights }),
+        },
+      },
+    });
+    await POSTS(app, '/aa-admin/experiments/create', {
+      env: 'prod',
+      key: 'my-exp',
+      title: 'T',
+      surface: 'client',
+      variants: [{ key: 'control', weight: 1, is_control: true }, { key: 'a', weight: 1, is_control: false }],
+    });
+    await POSTS(app, '/aa-admin/experiments/patch', { env: 'prod', id: 'my-exp', patch: { status: 'running' } });
+    await POSTS(app, '/aa-admin/experiments/bump-salt', { env: 'prod', id: 'my-exp' });
+    await POSTS(app, '/aa-admin/experiments/rename-variant', { env: 'prod', expKey: 'my-exp', from: 'a', to: 'b' });
+    await POSTS(app, '/aa-admin/experiments/variant-weights', { env: 'prod', id: 'my-exp', weights: [{ key: 'a', weight: 2 }] });
+
+    expect(createExperiment).toHaveBeenCalledWith(expect.anything(), 'stub-client');
+    expect(patchExperiment).toHaveBeenCalledWith('my-exp', expect.anything(), 'stub-client');
+    expect(bumpSalt).toHaveBeenCalledWith('my-exp', 'stub-client');
+    expect(renameVariant).toHaveBeenCalledWith('my-exp', 'a', 'b', 'stub-client');
+    expect(saveVariantWeights).toHaveBeenCalledWith('my-exp', expect.anything(), 'stub-client');
+    await app.close();
+  });
 });
 
 import type { AaAdminStore } from './services/aa-admin-store';

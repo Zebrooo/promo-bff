@@ -741,6 +741,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Тело: { env, key, title, surface: 'client'|'dynamic', variants: [{key,
   // weight, is_control}] }. Валидации зеркалят createExperiment из actions.ts
   // (kebab-case ключ, ≥2 варианта, ровно нужен control, уникальные ключи).
+  // 409 key_exists — отдельно от общего 400, дубль ключа не «плохой ввод».
   app.post('/aa-admin/experiments/create', async (request, reply) => {
     const auth = await authenticator.authenticate(request);
     if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
@@ -761,9 +762,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       weight: Number((v as { weight?: unknown })?.weight),
       is_control: !!(v as { is_control?: unknown })?.is_control,
     }));
+    const actor = auth.clientId ?? 'promo-cabinet';
     try {
-      const result = await resolved.store.createExperiment({ key, title, surface, variants: variantsInput });
-      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      const result = await resolved.store.createExperiment({ key, title, surface, variants: variantsInput }, actor);
+      if (!result.ok) {
+        // key_exists — отдельный код (409): кабинет уже умеет показывать этот
+        // конфликт иначе, чем прочие 400 (плохой ввод).
+        if (result.code === 'key_exists') return reply.code(409).send({ error: 'key_exists', reason: result.error });
+        return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      }
       return reply.code(200).send({ ok: true });
     } catch (err) {
       app.log.error({ err }, 'POST /aa-admin/experiments/create failed');
@@ -785,8 +792,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (typeof id !== 'string' || !id.trim() || typeof patch !== 'object' || patch === null) {
       return reply.code(400).send({ error: 'bad_request', reason: 'id and patch required' });
     }
+    const actor = auth.clientId ?? 'promo-cabinet';
     try {
-      const result = await resolved.store.patchExperiment(id, patch as Record<string, unknown>);
+      const result = await resolved.store.patchExperiment(id, patch as Record<string, unknown>, actor);
       if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
       return reply.code(200).send({ ok: true });
     } catch (err) {
@@ -806,8 +814,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (typeof id !== 'string' || !id.trim()) {
       return reply.code(400).send({ error: 'bad_request', reason: 'id required' });
     }
+    const actor = auth.clientId ?? 'promo-cabinet';
     try {
-      const result = await resolved.store.bumpSalt(id);
+      const result = await resolved.store.bumpSalt(id, actor);
       if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
       return reply.code(200).send({ ok: true });
     } catch (err) {
@@ -828,8 +837,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (typeof expKey !== 'string' || typeof from !== 'string' || typeof to !== 'string') {
       return reply.code(400).send({ error: 'bad_request', reason: 'expKey, from, to required' });
     }
+    const actor = auth.clientId ?? 'promo-cabinet';
     try {
-      const result = await resolved.store.renameVariant(expKey, from, to);
+      const result = await resolved.store.renameVariant(expKey, from, to, actor);
       if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
       return reply.code(200).send({ ok: true });
     } catch (err) {
@@ -853,8 +863,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       key: typeof (w as { key?: unknown })?.key === 'string' ? (w as { key: string }).key : '',
       weight: Number((w as { weight?: unknown })?.weight),
     }));
+    const actor = auth.clientId ?? 'promo-cabinet';
     try {
-      const result = await resolved.store.saveVariantWeights(id, weightsInput);
+      const result = await resolved.store.saveVariantWeights(id, weightsInput, actor);
       if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
       return reply.code(200).send({ ok: true });
     } catch (err) {

@@ -2,9 +2,13 @@
  * Пульт канарейки релиза и A/B-экспериментов abkhaz-auto — серверная сторона
  * ручек /aa-admin/* (перенос из серверных экшенов витрины
  * src/app/admin/experiments/actions.ts, чтобы кабинет мог управлять test/prod
- * стендами без прямого доступа к их Supabase). Семантика мутаций (проверки,
- * какие поля пишутся) скопирована оттуда 1:1 — источник правды для схемы
- * остаётся в витрине, здесь только зеркало.
+ * стендами без прямого доступа к их Supabase). Валидации и набор пишущихся
+ * полей скопированы оттуда 1:1 — источник правды для схемы остаётся в
+ * витрине. ЕДИНСТВЕННОЕ сознательное отличие — аудит (experiment_audit):
+ * там actor = uuid пользователя-админа из profiles, у BFF аутентифицирован
+ * не человек, а сервис (service-ticket). actor.uuid оставляем NULL (колонка
+ * nullable — проверено на живой БД) и кодируем личность вызывающего сервиса
+ * префиксом в action: `${clientId}:create` вместо `create`.
  *
  * Same pattern as analytics-store/referral-config-service: raw fetch на
  * PostgREST, service-role ключ, withTimeout. В отличие от них — БЕЗ no-op
@@ -46,7 +50,15 @@ export interface ExperimentVariantRow {
   position: number;
 }
 
-export type AdminResult = { ok: true } | { ok: false; error: string };
+export type AdminResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: string;
+      /** 'key_exists' — уникальный конфликт (23505); server.ts мапит его на 409,
+       *  не 400 (кабинет уже умеет отдельно показывать этот случай). */
+      code?: 'key_exists';
+    };
 
 export interface CreateExperimentInput {
   key: string;
@@ -70,11 +82,15 @@ export interface AaAdminStore {
   getCanaryState(): Promise<CanaryStateRow | null>;
   setCanaryPct(pct: number, actor: string): Promise<AdminResult>;
   listExperiments(): Promise<{ experiments: ExperimentRow[]; variants: ExperimentVariantRow[] }>;
-  createExperiment(input: CreateExperimentInput): Promise<AdminResult>;
-  patchExperiment(key: string, patch: PatchExperimentInput): Promise<AdminResult>;
-  bumpSalt(key: string): Promise<AdminResult>;
-  renameVariant(expKey: string, from: string, to: string): Promise<AdminResult>;
-  saveVariantWeights(key: string, weights: { key: string; weight: number }[]): Promise<AdminResult>;
+  createExperiment(input: CreateExperimentInput, actor: string): Promise<AdminResult>;
+  patchExperiment(key: string, patch: PatchExperimentInput, actor: string): Promise<AdminResult>;
+  bumpSalt(key: string, actor: string): Promise<AdminResult>;
+  renameVariant(expKey: string, from: string, to: string, actor: string): Promise<AdminResult>;
+  saveVariantWeights(
+    key: string,
+    weights: { key: string; weight: number }[],
+    actor: string,
+  ): Promise<AdminResult>;
 }
 
 // Те же правила, что в витрине (actions.ts) — расходиться с ними нельзя,
@@ -124,6 +140,43 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     return msg ?? `HTTP ${res.status}`;
   }
 
+  // Аудит мутаций эксперимента — зеркало actions.ts audit(), но actor.uuid
+  // всегда NULL (у BFF нет id админа-человека, только clientId сервиса из
+  // ticket-auth) и личность вызывающего закодирована префиксом в action
+  // (`${actor}:create` вместо `create`). Fire-and-forget строго: вызывающий
+  // код зовёт её БЕЗ await (`void writeAudit(...)`) — иначе повисшая запись
+  // в experiment_audit съедала бы бюджет withTimeout, которым уже обёрнута
+  // сама мутация, и превращала бы успешную мутацию в TimeoutError. try/catch
+  // внутри — на случай, если её всё же кто-то заawait-ит по ошибке.
+  async function writeAudit(
+    experimentKey: string,
+    actor: string,
+    action: string,
+    before: unknown,
+    after: unknown,
+  ): Promise<void> {
+    try {
+      const res = await pgFetch('experiment_audit', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          experiment_key: experimentKey,
+          actor: null,
+          action: `${actor}:${action}`,
+          before: before ?? null,
+          after: after ?? null,
+        }),
+      });
+      if (!res.ok) {
+        // eslint-disable-next-line no-console
+        console.warn(`aa-admin-store writeAudit failed: ${await errorMessage(res)}`);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('aa-admin-store writeAudit threw:', err);
+    }
+  }
+
   async function getCanaryState(): Promise<CanaryStateRow | null> {
     const res = await pgFetch('canary_state?id=eq.1&select=colour,pct,updated_at,updated_by');
     if (!res.ok) throw new Error(`aa-admin-store getCanaryState failed: ${await errorMessage(res)}`);
@@ -146,6 +199,10 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     const st = ((await stRes.json()) as { colour: string | null }[])[0];
     if (!st?.colour) return { ok: false, error: 'Канарейка не включена на сервере' };
 
+    // updated_by = actor (clientId сервис-тикета, напр. 'promo-cabinet'), а
+    // НЕ id человека-админа, как в витрине (там assertAdmin() отдаёт uuid).
+    // Принятое решение: кабинет однопользовательский, различать конкретного
+    // человека за пультом смысла нет — сервис-имя как есть.
     const res = await pgFetch('canary_state?id=eq.1', {
       method: 'PATCH',
       headers: { Prefer: 'return=minimal' },
@@ -169,7 +226,7 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     return { experiments, variants };
   }
 
-  async function createExperiment(input: CreateExperimentInput): Promise<AdminResult> {
+  async function createExperiment(input: CreateExperimentInput, actor: string): Promise<AdminResult> {
     const key = input.key.trim();
     if (!KEY_RE.test(key)) return { ok: false, error: 'Ключ: kebab-case, латиница/цифры, 2–49 симв.' };
     if (!input.title.trim()) return { ok: false, error: 'Нужен заголовок' };
@@ -182,6 +239,10 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     if (new Set(vars.map((v) => v.key)).size !== vars.length) {
       return { ok: false, error: 'Ключи вариантов должны быть уникальны' };
     }
+    // saveVariantWeights уже валидирует вес так же — здесь та же дыра была
+    // не прикрыта: NaN/Infinity молча схлопывались в 0 через Math.trunc.
+    const badWeight = vars.find((v) => !Number.isFinite(Number(v.weight)));
+    if (badWeight) return { ok: false, error: `Некорректный вес для ${badWeight.key}` };
 
     const expRes = await pgFetch('experiments', {
       method: 'POST',
@@ -192,7 +253,8 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
       // 23505 = unique_violation (PostgREST прокидывает Postgres SQLSTATE в теле).
       const body = await expRes.json().catch(() => null);
       const code = body && typeof body === 'object' ? (body as { code?: string }).code : undefined;
-      return { ok: false, error: code === '23505' ? 'Ключ уже существует' : await errorMessage(expRes) };
+      if (code === '23505') return { ok: false, error: 'Ключ уже существует', code: 'key_exists' };
+      return { ok: false, error: await errorMessage(expRes) };
     }
 
     const varRes = await pgFetch('experiment_variants', {
@@ -216,10 +278,11 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
       }).catch(() => {});
       return { ok: false, error: await errorMessage(varRes) };
     }
+    void writeAudit(key, actor, 'create', null, { title: input.title, surface: input.surface, variants: vars });
     return { ok: true };
   }
 
-  async function patchExperiment(key: string, patch: PatchExperimentInput): Promise<AdminResult> {
+  async function patchExperiment(key: string, patch: PatchExperimentInput, actor: string): Promise<AdminResult> {
     const beforeRes = await pgFetch(`experiments?key=eq.${encodeURIComponent(key)}&select=*`);
     if (!beforeRes.ok) return { ok: false, error: await errorMessage(beforeRes) };
     const before = ((await beforeRes.json()) as ExperimentRow[])[0];
@@ -255,10 +318,11 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
       body: JSON.stringify(upd),
     });
     if (!res.ok) return { ok: false, error: await errorMessage(res) };
+    void writeAudit(key, actor, 'patch', before, upd);
     return { ok: true };
   }
 
-  async function bumpSalt(key: string): Promise<AdminResult> {
+  async function bumpSalt(key: string, actor: string): Promise<AdminResult> {
     const beforeRes = await pgFetch(`experiments?key=eq.${encodeURIComponent(key)}&select=salt`);
     if (!beforeRes.ok) return { ok: false, error: await errorMessage(beforeRes) };
     const before = ((await beforeRes.json()) as { salt: number }[])[0];
@@ -270,10 +334,11 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
       body: JSON.stringify({ salt: next, updated_at: new Date().toISOString() }),
     });
     if (!res.ok) return { ok: false, error: await errorMessage(res) };
+    void writeAudit(key, actor, 'bump_salt', before, { salt: next });
     return { ok: true };
   }
 
-  async function renameVariant(expKey: string, from: string, to: string): Promise<AdminResult> {
+  async function renameVariant(expKey: string, from: string, to: string, actor: string): Promise<AdminResult> {
     const next = to.trim();
     if (!KEY_RE.test(next) && next !== 'control') {
       return { ok: false, error: 'Ключ варианта: kebab-case, латиница/цифры' };
@@ -296,12 +361,14 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     }
     const updated = (await res.json().catch(() => [])) as { key: string }[];
     if (!updated.length) return { ok: false, error: `Варианта «${from}» нет` };
+    void writeAudit(expKey, actor, 'rename_variant', { from }, { to: next });
     return { ok: true };
   }
 
   async function saveVariantWeights(
     key: string,
     weights: { key: string; weight: number }[],
+    actor: string,
   ): Promise<AdminResult> {
     for (const w of weights) {
       const weight = Math.max(0, Math.trunc(Number(w.weight)));
@@ -316,6 +383,7 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
       );
       if (!res.ok) return { ok: false, error: await errorMessage(res) };
     }
+    void writeAudit(key, actor, 'weights', null, weights);
     return { ok: true };
   }
 
@@ -326,13 +394,14 @@ export function createAaAdminStore(cfg: SupabaseConfig): AaAdminStore {
     getCanaryState: () => withTimeout(getCanaryState(), timeoutMs, 'aaAdminStore.getCanaryState'),
     setCanaryPct: (pct, actor) => withTimeout(setCanaryPct(pct, actor), timeoutMs, 'aaAdminStore.setCanaryPct'),
     listExperiments: () => withTimeout(listExperiments(), timeoutMs, 'aaAdminStore.listExperiments'),
-    createExperiment: (input) => withTimeout(createExperiment(input), timeoutMs, 'aaAdminStore.createExperiment'),
-    patchExperiment: (key, patch) =>
-      withTimeout(patchExperiment(key, patch), timeoutMs, 'aaAdminStore.patchExperiment'),
-    bumpSalt: (key) => withTimeout(bumpSalt(key), timeoutMs, 'aaAdminStore.bumpSalt'),
-    renameVariant: (expKey, from, to) =>
-      withTimeout(renameVariant(expKey, from, to), timeoutMs, 'aaAdminStore.renameVariant'),
-    saveVariantWeights: (key, weights) =>
-      withTimeout(saveVariantWeights(key, weights), timeoutMs, 'aaAdminStore.saveVariantWeights'),
+    createExperiment: (input, actor) =>
+      withTimeout(createExperiment(input, actor), timeoutMs, 'aaAdminStore.createExperiment'),
+    patchExperiment: (key, patch, actor) =>
+      withTimeout(patchExperiment(key, patch, actor), timeoutMs, 'aaAdminStore.patchExperiment'),
+    bumpSalt: (key, actor) => withTimeout(bumpSalt(key, actor), timeoutMs, 'aaAdminStore.bumpSalt'),
+    renameVariant: (expKey, from, to, actor) =>
+      withTimeout(renameVariant(expKey, from, to, actor), timeoutMs, 'aaAdminStore.renameVariant'),
+    saveVariantWeights: (key, weights, actor) =>
+      withTimeout(saveVariantWeights(key, weights, actor), timeoutMs, 'aaAdminStore.saveVariantWeights'),
   };
 }
