@@ -84,6 +84,11 @@ export interface AppConfig {
    *  the user_actions_* aggregate RPCs. Distinct deployment from the promo
    *  Supabase: BFF needs creds for both to bridge analytics. */
   aaSupabase: SupabaseConfig;
+  /** abkhaz-auto TEST Supabase — отдельный деплой стенда (canary_state/experiments
+   *  там тоже свои). /aa-admin/* ручки резолвят env:'test'|'prod' в этот конфиг
+   *  или в aaSupabase, чтобы пульт канарейки/экспериментов не мог случайно
+   *  задеть прод, работая со стендом (и наоборот). */
+  aaTestSupabase: SupabaseConfig;
   support: SupportConfig;
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
@@ -133,6 +138,13 @@ export const config: AppConfig = {
     url: (process.env.AA_SUPABASE_URL ?? '').replace(/\/$/, ''),
     serviceRoleKey: process.env.AA_SUPABASE_SERVICE_ROLE_KEY ?? '',
     timeoutMs: Number(process.env.AA_SUPABASE_TIMEOUT_MS ?? 2500),
+  },
+  aaTestSupabase: {
+    // abkhaz-auto TEST-стенд — отдельная Supabase-инсталляция, отдельные creds.
+    // Пусто, если стенд не поднят/не сконфигурен на этом деплое BFF.
+    url: (process.env.AA_TEST_SUPABASE_URL ?? '').replace(/\/$/, ''),
+    serviceRoleKey: process.env.AA_TEST_SUPABASE_SERVICE_ROLE_KEY ?? '',
+    timeoutMs: Number(process.env.AA_TEST_SUPABASE_TIMEOUT_MS ?? 2500),
   },
   support: {
     // AI support backend: relays site users' messages to the local claudeclaw

@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyError, type FastifyReply } from 'fastify';
 import { fileURLToPath } from 'node:url';
 import { config } from './config';
 import { createStubAuthenticator, type Authenticator } from './auth';
@@ -12,6 +12,7 @@ import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
 import { createReferralConfigService, type ReferralConfigService } from './services/referral-config-service';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
+import { createAaAdminStore, type AaAdminStore } from './services/aa-admin-store';
 import { createCheckerStatsService, type CheckerStatsService } from './services/checker-stats';
 import { createSelectionTraceService, type SelectionTraceService } from './services/selection-trace';
 import { withTimeout } from './util/with-timeout';
@@ -58,6 +59,8 @@ export interface BuildServerOptions {
         analyticsStore: AnalyticsStore;
         errorStore: ErrorStore;
         referralConfigService: ReferralConfigService;
+        /** test/prod пара — держим оба стора, роут резолвит нужный по body.env. */
+        aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
       }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
@@ -258,6 +261,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // promo_analytics_* (миграция 0066) из той же AA Supabase. No-op store
   // когда AA не сконфигурена.
   const analyticsStore: AnalyticsStore = opts.deps?.analyticsStore ?? createAnalyticsStore();
+
+  // Пульт канарейки/экспериментов abkhaz-auto (/aa-admin/*) — два независимых
+  // Supabase-стенда (test/prod), каждый запрос сам выбирает env в теле. Оба
+  // стора строятся заранее (дёшево — просто замыкание над fetch), а не по
+  // запросу, чтобы не плодить объекты на каждый POST.
+  const aaAdminStores: Record<'test' | 'prod', AaAdminStore> = opts.deps?.aaAdminStores ?? {
+    test: createAaAdminStore(config.aaTestSupabase),
+    prod: createAaAdminStore(config.aaSupabase),
+  };
 
   app.post('/models', async (request, reply) => {
     // 1. Parse JSON — Fastify has already parsed the body and auto-400s malformed JSON.
@@ -627,6 +639,228 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const raw = JSON.stringify(request.body ?? {});
     const result = await handleSupportCallback(raw, sig);
     return reply.code(result.status).send({ ok: result.ok });
+  });
+
+  // ── aa-admin: пульт канарейки релиза и A/B-экспериментов abkhaz-auto ─────
+  // Перенос серверных экшенов витрины (src/app/admin/experiments/actions.ts)
+  // в BFF — кабинет получает управление обоими стендами (test/prod) без
+  // прямого service-role доступа к их Supabase из браузера. Тикет-auth, как у
+  // остальных ручек; каждый запрос указывает env явно (никакого «дефолтного»
+  // окружения — цена ошибки здесь prod-канарейка или прод-эксперимент).
+  //
+  // НЕ перенесено: forceVariant (кука aa_exp_force в браузере витрины для
+  // QA-залипания в вариант) — она держит состояние в cookie jar того же
+  // рендера, что и middleware, читающий флаги; вне процесса витрины ставить
+  // эту куку некому и незачем.
+  type AaEnv = 'test' | 'prod';
+
+  function resolveAaAdminStore(
+    body: Record<string, unknown>,
+    reply: FastifyReply,
+  ): { store: AaAdminStore; env: AaEnv } | null {
+    const env = body.env;
+    if (env !== 'test' && env !== 'prod') {
+      reply.code(400).send({ error: 'bad_request', reason: 'env must be "test" or "prod"' });
+      return null;
+    }
+    const store = aaAdminStores[env];
+    // configured берём со стора (а не заново читаем config.aa*Supabase) —
+    // так тесты, подсовывающие свой aaAdminStores через deps, не зависят от
+    // реального process.env, а прод-код видит тот же факт, что уже решил
+    // createAaAdminStore при старте.
+    if (!store.configured) {
+      reply.code(503).send({ error: 'env_not_configured', env });
+      return null;
+    }
+    return { store, env };
+  }
+
+  app.post('/aa-admin/canary/state', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    try {
+      const row = await resolved.store.getCanaryState();
+      return reply.code(200).send(
+        row ?? { colour: null, pct: 0, updated_at: null, updated_by: null },
+      );
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/canary/state failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // pct: целое 0..99 (0 = стоп раздачи кук, канарейка сама остаётся
+  // сконфигурена на сервере); colour пишет только bluegreen.sh — если он
+  // NULL, менять нечего (409, а не тихий no-op).
+  app.post('/aa-admin/canary/pct', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const pctRaw = body.pct;
+    if (typeof pctRaw !== 'number' || !Number.isInteger(pctRaw) || pctRaw < 0 || pctRaw > 99) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'pct must be an integer 0..99' });
+    }
+    const actor = auth.clientId ?? 'promo-cabinet';
+    try {
+      const result = await resolved.store.setCanaryPct(pctRaw, actor);
+      if (!result.ok) {
+        // Store различает «отказ семантики» (ok:false — плохой pct/colour
+        // IS NULL/PostgREST 4xx) от «Supabase недоступна» (throw, catch ниже).
+        // Первое — по ТЗ 409 canary_not_active; сюда же попадёт неожиданный
+        // 4xx от PostgREST, но такое требует расхождения со схемой БД, не
+        // штатный кейс, отдельного кода под него не заводим.
+        return reply.code(409).send({ error: 'canary_not_active', reason: result.error });
+      }
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/canary/pct failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  app.post('/aa-admin/experiments/list', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    try {
+      const { experiments, variants } = await resolved.store.listExperiments();
+      return reply.code(200).send({ experiments, variants });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/list failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // Тело: { env, key, title, surface: 'client'|'dynamic', variants: [{key,
+  // weight, is_control}] }. Валидации зеркалят createExperiment из actions.ts
+  // (kebab-case ключ, ≥2 варианта, ровно нужен control, уникальные ключи).
+  app.post('/aa-admin/experiments/create', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const { key, title, surface, variants } = body as {
+      key?: unknown;
+      title?: unknown;
+      surface?: unknown;
+      variants?: unknown;
+    };
+    if (typeof key !== 'string' || typeof title !== 'string' || typeof surface !== 'string' || !Array.isArray(variants)) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'key, title, surface, variants[] required' });
+    }
+    const variantsInput = variants.map((v) => ({
+      key: typeof (v as { key?: unknown })?.key === 'string' ? (v as { key: string }).key : '',
+      weight: Number((v as { weight?: unknown })?.weight),
+      is_control: !!(v as { is_control?: unknown })?.is_control,
+    }));
+    try {
+      const result = await resolved.store.createExperiment({ key, title, surface, variants: variantsInput });
+      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/create failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // Тело: { env, id (= experiment key), patch: { rollout_pct?, status?,
+  // kill_switch?, surface?, authOnly? } }. `id` — имя как в остальных ручках
+  // проекта (не совпадает с полем в БД, там это `key`) — store принимает его
+  // как ключ эксперимента.
+  app.post('/aa-admin/experiments/patch', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const { id, patch } = body as { id?: unknown; patch?: unknown };
+    if (typeof id !== 'string' || !id.trim() || typeof patch !== 'object' || patch === null) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'id and patch required' });
+    }
+    try {
+      const result = await resolved.store.patchExperiment(id, patch as Record<string, unknown>);
+      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/patch failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // Тело: { env, id (= experiment key) }. Перебакетирует всех зрителей заново.
+  app.post('/aa-admin/experiments/bump-salt', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const { id } = body as { id?: unknown };
+    if (typeof id !== 'string' || !id.trim()) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'id required' });
+    }
+    try {
+      const result = await resolved.store.bumpSalt(id);
+      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/bump-salt failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // Тело: { env, expKey, from, to }. `to` должен быть kebab-case (или
+  // литерал "control"), как в actions.ts renameVariant.
+  app.post('/aa-admin/experiments/rename-variant', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const { expKey, from, to } = body as { expKey?: unknown; from?: unknown; to?: unknown };
+    if (typeof expKey !== 'string' || typeof from !== 'string' || typeof to !== 'string') {
+      return reply.code(400).send({ error: 'bad_request', reason: 'expKey, from, to required' });
+    }
+    try {
+      const result = await resolved.store.renameVariant(expKey, from, to);
+      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/rename-variant failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
+  });
+
+  // Тело: { env, id (= experiment key), weights: [{key, weight}] }.
+  app.post('/aa-admin/experiments/variant-weights', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const resolved = resolveAaAdminStore(body, reply);
+    if (!resolved) return;
+    const { id, weights } = body as { id?: unknown; weights?: unknown };
+    if (typeof id !== 'string' || !id.trim() || !Array.isArray(weights)) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'id and weights[] required' });
+    }
+    const weightsInput = weights.map((w) => ({
+      key: typeof (w as { key?: unknown })?.key === 'string' ? (w as { key: string }).key : '',
+      weight: Number((w as { weight?: unknown })?.weight),
+    }));
+    try {
+      const result = await resolved.store.saveVariantWeights(id, weightsInput);
+      if (!result.ok) return reply.code(400).send({ error: 'bad_request', reason: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'POST /aa-admin/experiments/variant-weights failed');
+      return reply.code(502).send({ error: 'aa_admin_unavailable' });
+    }
   });
 
   // Liveness + readiness probes (unauthenticated — for the orchestrator, not data).

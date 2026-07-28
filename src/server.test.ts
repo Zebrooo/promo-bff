@@ -588,6 +588,154 @@ describe('Analytics routes', () => {
   });
 });
 
+describe('POST /aa-admin/*', () => {
+  const POSTS = (
+    app: ReturnType<typeof buildServer>,
+    url: string,
+    payload: unknown,
+    headers: Record<string, string> = AUTH,
+  ) => app.inject({ method: 'POST', url, headers, payload: payload as object });
+
+  function makeAdminStore(overrides: Partial<AaAdminStore> = {}): AaAdminStore {
+    return {
+      configured: true,
+      getCanaryState: async () => null,
+      setCanaryPct: async () => ({ ok: true }),
+      listExperiments: async () => ({ experiments: [], variants: [] }),
+      createExperiment: async () => ({ ok: true }),
+      patchExperiment: async () => ({ ok: true }),
+      bumpSalt: async () => ({ ok: true }),
+      renameVariant: async () => ({ ok: true }),
+      saveVariantWeights: async () => ({ ok: true }),
+      ...overrides,
+    };
+  }
+
+  it('401 без ticket на любую /aa-admin/* ручку', async () => {
+    const app = buildServer({ logger: false, deps: { aaAdminStores: { test: makeAdminStore(), prod: makeAdminStore() } } });
+    expect((await POSTS(app, '/aa-admin/canary/state', { env: 'prod' }, {})).statusCode).toBe(401);
+    expect((await POSTS(app, '/aa-admin/experiments/list', { env: 'prod' }, {})).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('400 когда env отсутствует или невалиден', async () => {
+    const app = buildServer({ logger: false, deps: { aaAdminStores: { test: makeAdminStore(), prod: makeAdminStore() } } });
+    expect((await POSTS(app, '/aa-admin/canary/state', {})).statusCode).toBe(400);
+    expect((await POSTS(app, '/aa-admin/canary/state', { env: 'staging' })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('/aa-admin/canary/state возвращает строку из выбранного env-стора (test vs prod разделены)', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore({ getCanaryState: async () => ({ colour: 'blue', pct: 10, updated_at: 't', updated_by: 'a' }) }),
+          prod: makeAdminStore({ getCanaryState: async () => ({ colour: 'green', pct: 20, updated_at: 't2', updated_by: 'b' }) }),
+        },
+      },
+    });
+    const test = await POSTS(app, '/aa-admin/canary/state', { env: 'test' });
+    const prod = await POSTS(app, '/aa-admin/canary/state', { env: 'prod' });
+    expect(body(test)).toMatchObject({ colour: 'blue', pct: 10 });
+    expect(body(prod)).toMatchObject({ colour: 'green', pct: 20 });
+    await app.close();
+  });
+
+  it('/aa-admin/canary/pct — 400 на дробный/строковый/вне-диапазона pct', async () => {
+    const app = buildServer({ logger: false, deps: { aaAdminStores: { test: makeAdminStore(), prod: makeAdminStore() } } });
+    for (const pct of [1.5, '10', -1, 100, undefined]) {
+      const res = await POSTS(app, '/aa-admin/canary/pct', { env: 'prod', pct });
+      expect(res.statusCode, `pct=${JSON.stringify(pct)}`).toBe(400);
+    }
+    await app.close();
+  });
+
+  it('/aa-admin/canary/pct — принимает границы 0 и 99', async () => {
+    const setCanaryPct = vi.fn(async () => ({ ok: true as const }));
+    const app = buildServer({
+      logger: false,
+      deps: { aaAdminStores: { test: makeAdminStore(), prod: makeAdminStore({ setCanaryPct }) } },
+    });
+    expect((await POSTS(app, '/aa-admin/canary/pct', { env: 'prod', pct: 0 })).statusCode).toBe(200);
+    expect((await POSTS(app, '/aa-admin/canary/pct', { env: 'prod', pct: 99 })).statusCode).toBe(200);
+    expect(setCanaryPct).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
+  it('/aa-admin/canary/pct — 409 canary_not_active когда стор отказывает (colour null)', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore(),
+          prod: makeAdminStore({ setCanaryPct: async () => ({ ok: false, error: 'Канарейка не включена на сервере' }) }),
+        },
+      },
+    });
+    const res = await POSTS(app, '/aa-admin/canary/pct', { env: 'prod', pct: 10 });
+    expect(res.statusCode).toBe(409);
+    expect(body(res).error).toBe('canary_not_active');
+    await app.close();
+  });
+
+  it('/aa-admin/canary/pct — actor = auth.clientId (источник тикета/аутентификатора)', async () => {
+    const setCanaryPct = vi.fn(async () => ({ ok: true as const }));
+    const app = buildServer({
+      logger: false,
+      deps: { aaAdminStores: { test: makeAdminStore(), prod: makeAdminStore({ setCanaryPct }) } },
+    });
+    await POSTS(app, '/aa-admin/canary/pct', { env: 'prod', pct: 10 });
+    // Стаб-аутентификатор (дефолт в тестах) отдаёт clientId='stub-client';
+    // на проде это будет `src` из сервис-тикета (напр. 'promo-cabinet').
+    // Литерал 'promo-cabinet' в server.ts — fallback на случай authorized:true
+    // без clientId, который в норме не должен случаться ни у одного из двух
+    // аутентификаторов репо (оставлен как defense-in-depth, не тестируется
+    // отдельно: заставить authenticate() вернуть {authorized:true} без
+    // clientId можно только подсунув свой Authenticator в opts).
+    expect(setCanaryPct).toHaveBeenCalledWith(10, 'stub-client');
+    await app.close();
+  });
+
+  it('502 когда стор бросает (Supabase недоступен)', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        aaAdminStores: {
+          test: makeAdminStore(),
+          prod: makeAdminStore({ listExperiments: async () => { throw new Error('down'); } }),
+        },
+      },
+    });
+    const res = await POSTS(app, '/aa-admin/experiments/list', { env: 'prod' });
+    expect(res.statusCode).toBe(502);
+    await app.close();
+  });
+
+  it('503 env_not_configured когда выбранный env-стор не сконфигурен (configured=false)', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: { aaAdminStores: { test: makeAdminStore({ configured: false }), prod: makeAdminStore() } },
+    });
+    const res = await POSTS(app, '/aa-admin/canary/state', { env: 'test' });
+    expect(res.statusCode).toBe(503);
+    expect(body(res)).toEqual({ error: 'env_not_configured', env: 'test' });
+    await app.close();
+  });
+
+  it('дефолтная сборка (без deps override) реально читает config.aa*Supabase — в тестовом env оба пусты → 503', async () => {
+    // Регрессионный замок на резолвер: без деп-инъекции buildServer строит
+    // createAaAdminStore(config.aaSupabase/aaTestSupabase) сам — в CI/локально
+    // эти env-переменные не заданы, так что оба окружения должны быть 503, а
+    // не молча притворяться настроенными.
+    const app = buildServer({ logger: false });
+    expect((await POSTS(app, '/aa-admin/canary/state', { env: 'test' })).statusCode).toBe(503);
+    expect((await POSTS(app, '/aa-admin/canary/state', { env: 'prod' })).statusCode).toBe(503);
+    await app.close();
+  });
+});
+
+import type { AaAdminStore } from './services/aa-admin-store';
 import type { ErrorStore } from './services/error-store';
 
 describe('POST /errors', () => {
