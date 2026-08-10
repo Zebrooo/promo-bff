@@ -1,6 +1,6 @@
 import { config, type SupabaseConfig } from '../config';
 import { withTimeout } from '../util/with-timeout';
-import { fingerprint } from './fingerprint';
+import { fingerprint, normalizeErrorMetadata } from './fingerprint';
 
 export interface ErrorPayload {
   service: string;
@@ -38,6 +38,15 @@ export function createErrorStore(cfg: SupabaseConfig = config.aaSupabase): Error
   const table = `${url}/rest/v1/error_events`;
 
   async function recordError(p: ErrorPayload): Promise<void> {
+    const normalizedContext = { ...(p.context ?? {}) };
+    const normalizedMetadata = normalizeErrorMetadata({
+      method: p.method,
+      statusCode: p.statusCode,
+      kind: normalizedContext.kind,
+    });
+    delete normalizedContext.kind;
+    if (normalizedMetadata.kind !== null) normalizedContext.kind = normalizedMetadata.kind;
+
     const res = await fetch(table, {
       method: 'POST',
       headers: { ...authHeaders(serviceRoleKey), 'content-type': 'application/json', Prefer: 'return=minimal' },
@@ -49,15 +58,22 @@ export function createErrorStore(cfg: SupabaseConfig = config.aaSupabase): Error
         message: p.message,
         error_type: p.errorType ?? null,
         stack: p.stack ?? null,
-        fingerprint: fingerprint(p.message, p.stack, p.errorType),
+        fingerprint: fingerprint(p.message, p.stack, p.errorType, {
+          service: p.service,
+          route: p.route,
+          endpoint: typeof normalizedContext.url === 'string' ? normalizedContext.url : undefined,
+          method: normalizedMetadata.method,
+          statusCode: normalizedMetadata.statusCode,
+          kind: normalizedMetadata.kind,
+        }),
         release: p.release ?? null,
         route: p.route ?? null,
-        method: p.method ?? null,
-        status_code: p.statusCode ?? null,
+        method: normalizedMetadata.method,
+        status_code: normalizedMetadata.statusCode,
         user_id: p.userId ?? null,
         session_id: p.sessionId ?? null,
         user_agent: p.userAgent ?? null,
-        context: p.context ?? {},
+        context: normalizedContext,
       }),
     });
     if (!res.ok) throw new Error(`error-store write failed: HTTP ${res.status}`);
