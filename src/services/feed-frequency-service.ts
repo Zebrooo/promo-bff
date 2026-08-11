@@ -37,7 +37,7 @@ function createNoopService(): FeedFrequencyService {
   return { getViewCounts: async () => ({ hour: {}, day: {} }) };
 }
 
-export function createFeedFrequencyService(cfg: SupabaseConfig = config.aaSupabase): FeedFrequencyService {
+export function createFeedFrequencyService(cfg: SupabaseConfig = config.supabase): FeedFrequencyService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) return createNoopService();
   const rpc = `${url}/rest/v1/rpc/get_feed_view_counts`;

@@ -27,7 +27,7 @@ function authHeaders(key: string): Record<string, string> {
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 
-export function createBalanceService(cfg: SupabaseConfig = config.aaSupabase): BalanceService {
+export function createBalanceService(cfg: SupabaseConfig = config.supabase): BalanceService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) {
     return { getBalances: async () => new Map() };

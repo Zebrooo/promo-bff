@@ -128,9 +128,14 @@ export const config: AppConfig = {
       .filter(Boolean),
   },
   supabase: {
-    url: (process.env.PROMO_SUPABASE_URL ?? '').replace(/\/$/, ''),
-    serviceRoleKey: process.env.PROMO_SUPABASE_SERVICE_ROLE_KEY ?? '',
-    timeoutMs: Number(process.env.PROMO_SUPABASE_TIMEOUT_MS ?? 2500),
+    url: (process.env.PROMO_SUPABASE_URL || process.env.AA_SUPABASE_URL || '').replace(/\/$/, ''),
+    serviceRoleKey:
+      process.env.PROMO_SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.AA_SUPABASE_SERVICE_ROLE_KEY ||
+      '',
+    timeoutMs: Number(
+      process.env.PROMO_SUPABASE_TIMEOUT_MS || process.env.AA_SUPABASE_TIMEOUT_MS || 2500,
+    ),
   },
   aaSupabase: {
     // abkhaz-auto Supabase (e.g., https://supabase-aa.apsoftgroup.ru).
