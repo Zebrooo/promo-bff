@@ -19,6 +19,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   billingService: { getSubscription: async () => ({ level: 'plus' }) } as BillingService,
   impressionStore: { getImpressions: async () => ({ counts: {}, lastShownAt: {} }), recordImpression: async () => {} } as ImpressionStore,
   listingService: { getListingStats: async () => ({ activeListings: 0 }) } as ListingService,
+  searchHistoryService: { getSearchHistory: async () => [] },
   ...over,
 });
 
@@ -103,5 +104,63 @@ describe('handleSelectPromoList', () => {
     const configService = fakeConfigService({ getQueue: async () => { throw new Error('s3 down'); } });
     const result = await handleSelectPromoList({ userId: 'u1' }, deps({ configService }));
     expect(result).toEqual({ status: 'error', reason: 'config_service_unavailable' });
+  });
+
+  it('loads search history once for the whole list and filters targeted steps', async () => {
+    let loads = 0;
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [
+          makePromo({ id: 'toyota', targeting: { search: { terms: ['toyota'] } } }),
+          makePromo({ id: 'honda', targeting: { search: { terms: ['honda'] } } }),
+          makePromo({ id: 'generic' }),
+        ],
+        persist: false,
+      }),
+    });
+    const result = await handleSelectPromoList(
+      { userId: 'u-search', viewerKey: 'viewer-search' },
+      deps({
+        configService,
+        now: () => new Date('2026-08-12T12:00:00.000Z'),
+        searchHistoryService: {
+          getSearchHistory: async () => {
+            loads += 1;
+            return [{ query: 'Toyota Camry', section: 'avto', createdAt: '2026-08-11T12:00:00.000Z' }];
+          },
+        },
+      }),
+    );
+    expect(loads).toBe(1);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.steps.map((step) => step.id)).toEqual(['toyota', 'generic']);
+  });
+
+  it('keeps generic list steps when search history loading fails', async () => {
+    let loads = 0;
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [
+          makePromo({ id: 'targeted', targeting: { search: { sections: ['avto'] } } }),
+          makePromo({ id: 'generic' }),
+        ],
+        persist: false,
+      }),
+    });
+    const result = await handleSelectPromoList(
+      { userId: 'u-search', viewerKey: 'viewer-search' },
+      deps({
+        configService,
+        searchHistoryService: {
+          getSearchHistory: async () => {
+            loads += 1;
+            throw new Error('database unavailable');
+          },
+        },
+      }),
+    );
+    expect(loads).toBe(1);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.steps.map((step) => step.id)).toEqual(['generic']);
   });
 });

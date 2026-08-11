@@ -3,6 +3,7 @@ import { DateChecker } from './registry/Date';
 import { TargetingChecker } from './registry/Targeting';
 import { AudienceChecker } from './registry/Audience';
 import { ContextChecker } from './registry/Context';
+import { SearchChecker } from './registry/Search';
 import { DeviceChecker } from './registry/Device';
 import { FormatChecker } from './registry/Format';
 import { SellerChecker } from './registry/Seller';
@@ -11,6 +12,7 @@ import { ChainChecker } from './registry/Chain';
 
 export { Checker } from './Checker';
 export type { CheckContext, SupplierId, SuppliersData, UserData, Logger } from './Checker';
+export type { SearchHistoryEntry } from './Checker';
 export { loadSuppliers, type SupplierDeps } from './suppliers';
 
 /** Web checker collection, in evaluation order. */
@@ -19,6 +21,7 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new TargetingChecker(),
   new AudienceChecker(),
   new ContextChecker(),
+  new SearchChecker(),
   new DeviceChecker(),
   new FormatChecker(),
   new SellerChecker(),

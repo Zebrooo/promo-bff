@@ -15,6 +15,20 @@ describe('validateParams', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts and trims a valid viewerKey', () => {
+    const result = validateParams({ userId: 'user123', viewerKey: '  viewer-123  ' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.viewerKey).toBe('viewer-123');
+  });
+
+  it('strictly rejects invalid viewerKey values', () => {
+    expect(validateParams({ userId: 'user123', viewerKey: '' }).ok).toBe(false);
+    expect(validateParams({ userId: 'user123', viewerKey: '   ' }).ok).toBe(false);
+    expect(validateParams({ userId: 'user123', viewerKey: 123 }).ok).toBe(false);
+    expect(validateParams({ userId: 'user123', viewerKey: 'x'.repeat(129) }).ok).toBe(false);
+    expect(validateParams({ userId: 'user123', viewerKey: 'x'.repeat(128) }).ok).toBe(true);
+  });
+
   it('rejects a missing userId', () => {
     expect(validateParams({ context: {} })).toEqual({
       ok: false,

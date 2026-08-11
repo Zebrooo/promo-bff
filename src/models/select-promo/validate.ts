@@ -12,6 +12,7 @@ const KNOWN_CHECKER_NAMES = WEB_CHECKERS.map((c) => c.name);
 /** Bounds for params.excludeIds: a session-seen list, not a bulk filter. */
 const MAX_EXCLUDE_IDS = 50;
 const MAX_EXCLUDE_ID_LENGTH = 64;
+const MAX_VIEWER_KEY_LENGTH = 128;
 
 export type ValidationResult =
   | { ok: true; params: SelectPromoParams }
@@ -63,6 +64,20 @@ export function validateParams(params: unknown, opts: ValidationOptions = {}): V
   }
 
   const result: SelectPromoParams = { userId };
+
+  if (p.viewerKey !== undefined) {
+    if (typeof p.viewerKey !== 'string') {
+      return { ok: false, error: 'params.viewerKey must be a non-empty string' };
+    }
+    const viewerKey = p.viewerKey.trim();
+    if (viewerKey === '' || viewerKey.length > MAX_VIEWER_KEY_LENGTH) {
+      return {
+        ok: false,
+        error: `params.viewerKey must be a non-empty string of at most ${MAX_VIEWER_KEY_LENGTH} characters`,
+      };
+    }
+    result.viewerKey = viewerKey;
+  }
 
   if (typeof p.context === 'object' && p.context !== null) {
     result.context = p.context as SelectPromoParams['context'];

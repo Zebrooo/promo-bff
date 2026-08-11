@@ -1,10 +1,20 @@
 import { z } from 'zod';
 import type { Promo } from '../promo-selector/types';
+import { isValidNormalizedSearchTerm } from '../util/search-normalization';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
 export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
+
+export const searchTargetingSchema = z.object({
+  terms: z.array(
+    z.string().trim().min(2).max(80).regex(/[\p{L}\p{N}]/u).refine(isValidNormalizedSearchTerm),
+  ).max(20).optional(),
+  sections: z.array(z.string().trim().min(1).max(40).regex(/[\p{L}\p{N}]/u)).max(20).optional(),
+  match: z.enum(['any', 'all']).optional(),
+  lookbackDays: z.number().int().min(1).max(30).optional(),
+});
 
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
@@ -17,6 +27,7 @@ export const promoSchema = z.object({
     maxAge: z.number().int().nonnegative().optional(),
     regions: z.array(z.string()).optional(),
     subscriptionLevels: z.array(subscriptionLevelSchema).optional(),
+    search: searchTargetingSchema.optional(),
   }),
   // Optional per-user cap. Legacy data used 0 = unlimited; coerce that to
   // undefined (the new "unlimited") so old catalogues still parse.

@@ -21,6 +21,8 @@ export interface SelectPromoUser {
 
 export interface SelectPromoParams {
   userId: string;
+  /** Stable anonymous/authenticated viewer key used to read AA search history. */
+  viewerKey?: string;
   context?: {
     platform?: string;
     locale?: string;

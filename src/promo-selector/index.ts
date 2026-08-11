@@ -6,6 +6,7 @@ import {
   WEB_CHECKERS,
   type CheckContext,
   type Logger,
+  type SearchHistoryEntry,
   type SupplierDeps,
   type SupplierId,
   type SuppliersData,
@@ -59,6 +60,8 @@ export interface SelectPromoContext {
   formats?: string[];
   /** Promo ids to drop from the queue BEFORE the checkers run. Undefined/empty = no exclusion. */
   excludeIds?: string[];
+  /** Search rows preloaded once by the model handler. */
+  searchHistory?: SearchHistoryEntry[];
 }
 
 export interface SelectPromoOptions {
@@ -127,6 +130,7 @@ async function evaluateCandidate(
     category: ctx.category,
     device: ctx.device,
     formats: ctx.formats,
+    searchHistory: ctx.searchHistory,
   };
   const checks: CheckerTraceEntry[] = [];
   let passed = true;
