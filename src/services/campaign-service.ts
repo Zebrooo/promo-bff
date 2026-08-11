@@ -47,7 +47,7 @@ function authHeaders(key: string): Record<string, string> {
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 
-export function createCampaignService(cfg: SupabaseConfig = config.aaSupabase): CampaignService {
+export function createCampaignService(cfg: SupabaseConfig = config.supabase): CampaignService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) {
     return { getCampaignsForSlot: async () => [], getActiveBannerCampaigns: async () => [] };

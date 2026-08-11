@@ -23,7 +23,7 @@ function authHeaders(key: string): Record<string, string> {
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 
-export function createChargeService(cfg: SupabaseConfig = config.aaSupabase): ChargeService {
+export function createChargeService(cfg: SupabaseConfig = config.supabase): ChargeService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) {
     return { recordCampaignImpression: async () => {} };
