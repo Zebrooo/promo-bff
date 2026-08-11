@@ -29,6 +29,13 @@ services:
       # уходил на дефолт 3000 (src/config.ts:103). Держим явно здесь, иначе
       # витрина будет стучаться в закрытую дверь.
       PORT: "3191"
+      # На aaprod промо-данные живут в той же prod Supabase, что и Абхаз Авто.
+      # environment имеет приоритет над env_file, поэтому legacy-значения
+      # PROMO_SUPABASE_* из .env не смогут увести модели, показы и биллинг в
+      # старую базу. :? останавливает compose до запуска, если prod-реквизиты
+      # AA_SUPABASE_* в .env отсутствуют или пусты.
+      PROMO_SUPABASE_URL: "${AA_SUPABASE_URL:?AA_SUPABASE_URL must be set in .env}"
+      PROMO_SUPABASE_SERVICE_ROLE_KEY: "${AA_SUPABASE_SERVICE_ROLE_KEY:?AA_SUPABASE_SERVICE_ROLE_KEY must be set in .env}"
     networks:
       # web — общая с витриной: она зовёт http://promo-bff:3191
       - web

@@ -145,6 +145,15 @@ npm test           # vitest (46 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
+### Production Docker Compose
+
+On aaprod, `.env` must define non-empty `AA_SUPABASE_URL` and
+`AA_SUPABASE_SERVICE_ROLE_KEY`. The Compose service maps those values to
+`PROMO_SUPABASE_URL` and `PROMO_SUPABASE_SERVICE_ROLE_KEY`, so promo models,
+impressions, and billing use the Abkhaz Auto production database even if legacy
+`PROMO_SUPABASE_*` values remain in `.env`. Compose fails before starting the
+container when either `AA_SUPABASE_*` source value is missing or empty.
+
 ```bash
 curl -X POST http://localhost:3000/models \
   -H 'Content-Type: application/json' \
