@@ -53,7 +53,14 @@ export function validateAuctionParams(body: unknown): ValidationResult {
     }
     slots.push(pos);
   }
-  const params: AuctionParams = { slots };
+  const params: AuctionParams = { slots, exposure: 'simultaneous' };
+
+  if (b.exposure !== undefined) {
+    if (b.exposure !== 'simultaneous' && b.exposure !== 'sequence') {
+      return { ok: false, error: 'exposure must be simultaneous or sequence' };
+    }
+    params.exposure = b.exposure;
+  }
 
   if (b.page !== undefined) {
     if (typeof b.page !== 'string') return { ok: false, error: 'page must be a string' };

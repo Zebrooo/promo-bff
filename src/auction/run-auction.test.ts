@@ -176,6 +176,35 @@ describe('allocateAuction', () => {
     expect(out.has('low')).toBe(false);
     expect(out.size).toBe(2);
   });
+
+  it('sequence fills slots with distinct campaigns from the same advertiser', () => {
+    const balances = new Map([['adv-A', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 6000, 0, null),
+      ],
+      [pos('first', 1), pos('second', 2)],
+      { balances },
+      'sequence',
+    );
+
+    expect(out.get('first')?.id).toBe(1);
+    expect(out.get('second')?.id).toBe(2);
+  });
+
+  it('never repeats the same campaign in sequence exposure', () => {
+    const balances = new Map([['adv-A', 100_000]]);
+    const out = allocateAuction(
+      [budgeted(1, 'adv-A', 9000, 0, null)],
+      [pos('first', 1), pos('second', 2)],
+      { balances },
+      'sequence',
+    );
+
+    expect(out.get('first')?.id).toBe(1);
+    expect(out.has('second')).toBe(false);
+  });
 });
 
 describe('budgetCheck', () => {
