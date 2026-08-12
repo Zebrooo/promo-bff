@@ -33,4 +33,29 @@ describe('validateAuctionParams', () => {
     expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1 }], page: 5 }).ok).toBe(false);
     expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, format: 9 }] }).ok).toBe(false);
   });
+
+  it('accepts and preserves a positive bounded width+height pair', () => {
+    const r = validateAuctionParams({
+      slots: [{ slot: 'home-top-1', weight: 1, format: 'horizontal', width: 580, height: 120 }],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.slots[0]).toEqual({
+        slot: 'home-top-1',
+        weight: 1,
+        format: 'horizontal',
+        width: 580,
+        height: 120,
+      });
+    }
+  });
+
+  it('rejects partial, non-integer, non-positive, and unbounded slot sizes', () => {
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, width: 580 }] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, height: 120 }] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, width: 580.5, height: 120 }] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, width: 0, height: 120 }] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, width: 10_001, height: 120 }] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1, width: '580', height: 120 }] }).ok).toBe(false);
+  });
 });

@@ -16,6 +16,22 @@ function cand(id: number, advertiserId: string, cpmKopecks: number): CampaignCan
   };
 }
 
+function responsiveCand(id: number, advertiserId: string, cpmKopecks: number): CampaignCandidate {
+  return {
+    ...cand(id, advertiserId, cpmKopecks),
+    bannerFormat: 'horizontal',
+    creative: {
+      format: 'banner',
+      title: 'responsive',
+      imageUrl: 'https://i/legacy.png',
+      imageVariants: {
+        wide: { imageUrl: 'https://i/wide.png', width: 1200, height: 150 },
+        compact: { imageUrl: 'https://i/compact.png', width: 580, height: 120 },
+      },
+    },
+  };
+}
+
 function makeDeps(candidates: CampaignCandidate[], balances: Map<string, number>): AuctionDeps {
   return {
     campaignService: {
@@ -81,5 +97,26 @@ describe('handleAuction', () => {
     const deps = makeDepsThrowingBalances([cand(1, 'a', 9000)]);
     const res = await handleAuction({ slots: [{ slot: 'top', weight: 1 }] }, deps);
     if (res.status === 'ok') expect(res.data['top']).toBeNull();
+  });
+
+  it('renders the same winning campaign for the actual slot size on each request', async () => {
+    const candidate = responsiveCand(1, 'a', 9000);
+    const deps = makeDeps([candidate], new Map([['a', 10]]));
+
+    const compact = await handleAuction({
+      slots: [{ slot: 'top', weight: 1, format: 'horizontal', width: 580, height: 120 }],
+    }, deps);
+    const wide = await handleAuction({
+      slots: [{ slot: 'inline', weight: 1, format: 'horizontal', width: 820, height: 96 }],
+    }, deps);
+
+    expect(compact.status).toBe('ok');
+    expect(wide.status).toBe('ok');
+    if (compact.status === 'ok' && wide.status === 'ok') {
+      expect(compact.data.top?.imageUrl).toBe('https://i/compact.png');
+      expect(wide.data.inline?.imageUrl).toBe('https://i/wide.png');
+      expect(compact.data.top).not.toHaveProperty('imageVariants');
+      expect(wide.data.inline).not.toHaveProperty('imageVariants');
+    }
   });
 });
