@@ -5,7 +5,17 @@ describe('validateAuctionParams', () => {
   it('accepts a slots array of {slot, weight}', () => {
     const r = validateAuctionParams({ slots: [{ slot: 'home-top-1', weight: 1 }, { slot: 'home-side-2', weight: 4 }] });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.params.slots.length).toBe(2);
+    if (r.ok) {
+      expect(r.params.slots.length).toBe(2);
+      expect(r.params.exposure).toBe('simultaneous');
+    }
+  });
+  it('accepts sequence exposure and rejects unknown exposure', () => {
+    const r = validateAuctionParams({ slots: [{ slot: 'x', weight: 1 }], exposure: 'sequence' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.exposure).toBe('sequence');
+
+    expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1 }], exposure: 'carousel' }).ok).toBe(false);
   });
   it('rejects an empty or missing slots array', () => {
     expect(validateAuctionParams({}).ok).toBe(false);

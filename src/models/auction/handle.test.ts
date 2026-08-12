@@ -87,6 +87,27 @@ describe('handleAuction', () => {
     }
   });
 
+  it('passes sequence exposure without leaking request metadata into the response', async () => {
+    const deps = makeDeps(
+      [cand(1, 'a', 9000), cand(2, 'a', 3000)],
+      new Map([['a', 10]]),
+    );
+    const res = await handleAuction({
+      slots: [{ slot: 'first', weight: 1 }, { slot: 'second', weight: 2 }],
+      exposure: 'sequence',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data.first?.id).toBe('campaign:1');
+      expect(res.data.second?.id).toBe('campaign:2');
+      expect(res).not.toHaveProperty('exposure');
+      expect(res.data).not.toHaveProperty('exposure');
+      expect(res.data.first).not.toHaveProperty('advertiserId');
+      expect(res.data.second).not.toHaveProperty('advertiserId');
+    }
+  });
+
   it('error envelope when the campaign service fails', async () => {
     const deps = makeDepsThrowingCampaigns();
     const res = await handleAuction({ slots: [{ slot: 'top', weight: 1 }] }, deps);

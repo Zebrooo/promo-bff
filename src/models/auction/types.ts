@@ -1,6 +1,8 @@
 /** Public request/response types for the B2C batch auction endpoint (SP3 + SP5). */
 import type { ModelResult, Advertisement } from '../select-promo/types';
 
+export type AuctionExposure = 'simultaneous' | 'sequence';
+
 export interface AuctionPositionParam {
   slot: string;
   weight: number;
@@ -16,6 +18,8 @@ export interface AuctionPositionParam {
 export interface AuctionParams {
   /** The page's positions to fill, each with a rank weight (lower = best place). */
   slots: AuctionPositionParam[];
+  /** Whether positions are visible together or shown one after another. */
+  exposure?: AuctionExposure;
   /** Page key for targeting (e.g. "home", "catalog-transport"). */
   page?: string;
   /** Optional identity (reserved for future targeting/frequency). */

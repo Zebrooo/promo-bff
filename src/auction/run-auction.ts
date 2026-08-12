@@ -9,6 +9,7 @@
  * a budget/pacing check to the default list with no change to runAuction.
  */
 import type { CampaignCandidate } from '../services/campaign-service';
+import type { AuctionExposure } from '../models/auction/types';
 
 /** Вариант D: доля позиций in-feed ленты, зарезервированная под верхние места по
  *  ставке (поверх равной базы). За это и платят за верх — выше место крутится чаще.
@@ -94,22 +95,24 @@ export function allocateAuction(
   candidates: CampaignCandidate[],
   positions: AuctionPosition[],
   ctx: AuctionCheckContext,
+  exposureOrChecks: AuctionExposure | AuctionEligibilityCheck[] = 'simultaneous',
   checks: AuctionEligibilityCheck[] = DEFAULT_CHECKS,
 ): Map<string, CampaignCandidate> {
+  const exposure = Array.isArray(exposureOrChecks) ? 'simultaneous' : exposureOrChecks;
+  const eligibilityChecks = Array.isArray(exposureOrChecks) ? exposureOrChecks : checks;
   const eligible = candidates
-    .filter((c) => checks.every((chk) => chk.isEligible(c, ctx)))
+    .filter((c) => eligibilityChecks.every((chk) => chk.isEligible(c, ctx)))
     .sort((a, b) => (b.cpmKopecks - a.cpmKopecks) || (a.id - b.id));
   const ordered = [...positions].sort((a, b) => (a.weight - b.weight) || (a.slot < b.slot ? -1 : 1));
   const out = new Map<string, CampaignCandidate>();
   const usedCampaigns = new Set<number>();
-  // No-repeat-advertiser: один advertiser выигрывает максимум один слот в батче.
-  // Защищает от ситуации «один advertiser с highest cpm забирает все depth-tier слоты»
-  // на feed-cascade (см. spec 2026-06-02-ad-inventory-expansion-design.md, секция D).
+  // Simultaneous placements must not show one advertiser more than once. In a
+  // sequence, distinct campaigns from that advertiser are safe to show in turn.
   const usedAdvertisers = new Set<string>();
   for (const pos of ordered) {
     const winner = eligible.find((c) =>
       !usedCampaigns.has(c.id) &&
-      !usedAdvertisers.has(c.advertiserId) &&
+      (exposure === 'sequence' || !usedAdvertisers.has(c.advertiserId)) &&
       formatMatches(pos.format, c.bannerFormat),
     );
     if (winner) {

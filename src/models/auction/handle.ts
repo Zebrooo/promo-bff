@@ -53,7 +53,12 @@ export async function handleAuction(params: AuctionParams, deps: AuctionDeps): P
     balances = new Map();
   }
 
-  const winners = allocateAuction(renderable, params.slots, { balances, page: params.page });
+  const winners = allocateAuction(
+    renderable,
+    params.slots,
+    { balances, page: params.page },
+    params.exposure,
+  );
 
   const data: AuctionBatchData = {};
   for (const position of params.slots) {
