@@ -16,4 +16,11 @@ describe('production docker compose', () => {
       /^      PROMO_SUPABASE_SERVICE_ROLE_KEY:\s*"\$\{AA_SUPABASE_SERVICE_ROLE_KEY:\?[^}]+\}"$/m,
     );
   });
+
+  it('forwards the optional OpenRouter-only proxy without configuring a global proxy', () => {
+    expect(compose).toMatch(
+      /^      OPENROUTER_PROXY:\s*"\$\{OPENROUTER_PROXY:-\}"$/m,
+    );
+    expect(compose).not.toMatch(/^      HTTPS?_PROXY:/m);
+  });
 });
