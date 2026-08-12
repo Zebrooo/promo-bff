@@ -1,6 +1,23 @@
 /** Public request/response types for the select-promo model. */
 
 import type { Promo } from '../../promo-selector/types';
+import type { IdentityKind } from '../../promo-selector/checkers/Checker';
+export type { IdentityKind } from '../../promo-selector/checkers/Checker';
+
+export interface SelectPromoUser {
+  id?: string;
+  /** Canonical login-state flag; used only by the audience checker. */
+  isAuthorized?: boolean;
+  /** Controls whether account-backed suppliers may use this stable id. */
+  identityKind?: IdentityKind;
+  /**
+   * Short-lived Ed25519 proof binding an explicit account identity to this id.
+   * Required for new callers that send identityKind:'account'.
+   */
+  identityProof?: string;
+  /** @deprecated Input alias for isAuthorized. */
+  authenticated?: boolean;
+}
 
 export interface SelectPromoParams {
   userId: string;
@@ -41,9 +58,18 @@ export interface SelectPromoParams {
    * Inline user context from the client: identity + audience gate. Profile and
    * subscription are sourced by the BFF's userData supplier, not passed in.
    */
-  user?: {
-    id?: string;
-    authenticated?: boolean;
+  user?: SelectPromoUser;
+}
+
+/** Normalize canonical input and direct legacy in-process handler calls. */
+export function resolveUserIdentity(user?: SelectPromoUser): {
+  isAuthorized: boolean;
+  identityKind: IdentityKind;
+} {
+  const isAuthorized = user?.isAuthorized ?? user?.authenticated ?? false;
+  return {
+    isAuthorized,
+    identityKind: user?.identityKind ?? (isAuthorized ? 'account' : 'anonymous'),
   };
 }
 

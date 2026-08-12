@@ -1,10 +1,14 @@
 import type { Promo, SubscriptionLevel } from '../types';
 
+/** Stable identity source, independent from current login state. */
+export type IdentityKind = 'account' | 'anonymous';
+
 /** Per-promo evaluation context (identity + clock + the candidate promo). */
 export interface CheckContext {
   promo: Promo;
   userId: string;
-  authenticated: boolean;
+  /** Current login state. This affects audience eligibility only. */
+  isAuthorized: boolean;
   now: Date;
   /** Page section the user is browsing (overlay only; undefined elsewhere). */
   section?: string;

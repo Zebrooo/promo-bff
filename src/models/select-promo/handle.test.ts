@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleSelectPromo, type SelectPromoDeps } from './handle';
 import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
@@ -217,6 +217,87 @@ describe('handleSelectPromo', () => {
 
     const allowed = await handleSelectPromo({ userId: 'u1', user: { authenticated: true } }, deps({ configService }));
     expect(allowed.status).toBe('ok');
+  });
+
+  it('uses isAuthorized only for audience while a logged-out account still loads profile, billing and listings', async () => {
+    const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
+    const subscription = vi.fn(async () => ({ level: 'plus' as const }));
+    const listings = vi.fn(async () => ({ activeListings: 2 }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ audience: 'all', sellerStatus: 'seller' })], persist: false }),
+    });
+    const result = await handleSelectPromo({
+      userId: 'account-1',
+      user: { isAuthorized: false, identityKind: 'account' },
+    }, deps({
+      configService,
+      userService: fakeUserService({ getUserProfile: profile }),
+      billingService: fakeBillingService({ getSubscription: subscription }),
+      listingService: fakeListingService({ getListingStats: listings }),
+    }));
+    expect(result.status).toBe('ok');
+    expect(profile).toHaveBeenCalledWith('account-1');
+    expect(subscription).toHaveBeenCalledTimes(1);
+    expect(listings).toHaveBeenCalledWith('account-1');
+  });
+
+  it('does not admit a logged-out account to audience:authenticated even though its account datasource remains valid', async () => {
+    const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
+    const subscription = vi.fn(async () => ({ level: 'plus' as const }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ audience: 'authenticated' })], persist: false }),
+    });
+    const result = await handleSelectPromo({
+      userId: '11111111-1111-4111-8111-111111111111',
+      user: { isAuthorized: false, identityKind: 'account' },
+    }, deps({
+      configService,
+      userService: fakeUserService({ getUserProfile: profile }),
+      billingService: fakeBillingService({ getSubscription: subscription }),
+    }));
+    expect(result.status).toBe('skipped');
+    // Suppliers load once for the selection walk, but they do not influence the
+    // independent audience authorization decision.
+    expect(profile).toHaveBeenCalledTimes(1);
+    expect(subscription).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not load account profile, billing or listings for an anonymous identity', async () => {
+    const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
+    const subscription = vi.fn(async () => ({ level: 'plus' as const }));
+    const listings = vi.fn(async () => ({ activeListings: 2 }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ audience: 'all', sellerStatus: 'seller' })], persist: false }),
+    });
+    const result = await handleSelectPromo({
+      userId: 'anon-1',
+      user: { isAuthorized: false, identityKind: 'anonymous' },
+    }, deps({
+      configService,
+      userService: fakeUserService({ getUserProfile: profile }),
+      billingService: fakeBillingService({ getSubscription: subscription }),
+      listingService: fakeListingService({ getListingStats: listings }),
+    }));
+    expect(result.status).toBe('skipped');
+    expect(profile).not.toHaveBeenCalled();
+    expect(subscription).not.toHaveBeenCalled();
+    expect(listings).not.toHaveBeenCalled();
+  });
+
+  it('shares account metadata cache across login → logout while impressions stay fresh', async () => {
+    const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
+    const subscription = vi.fn(async () => ({ level: 'plus' as const }));
+    const getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }));
+    const sharedDeps = deps({
+      userService: fakeUserService({ getUserProfile: profile }),
+      billingService: fakeBillingService({ getSubscription: subscription }),
+      impressionStore: fakeImpressionStore({ getImpressions }),
+    });
+    await handleSelectPromo({ userId: 'account-cache', user: { isAuthorized: true, identityKind: 'account' } }, sharedDeps);
+    await handleSelectPromo({ userId: 'account-cache', user: { isAuthorized: false, identityKind: 'account' } }, sharedDeps);
+    expect(profile).toHaveBeenCalledTimes(1);
+    expect(subscription).toHaveBeenCalledTimes(1);
+    expect(getImpressions).toHaveBeenCalledTimes(2);
   });
 
   it('last-shown timestamp from the store drives the cooldown checker', async () => {

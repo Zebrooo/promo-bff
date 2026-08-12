@@ -20,7 +20,7 @@ export function makeCheckContext(overrides: Partial<CheckContext> = {}): CheckCo
   return {
     promo: makePromo(),
     userId: 'user-1',
-    authenticated: false,
+    isAuthorized: false,
     now: new Date('2024-06-01T12:00:00.000Z'),
     ...overrides,
   };

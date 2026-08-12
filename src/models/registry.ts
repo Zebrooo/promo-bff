@@ -1,10 +1,10 @@
 import type { SelectPromoDeps } from './select-promo/handle';
 import { handleSelectPromo } from './select-promo/handle';
-import { validateParams } from './select-promo/validate';
+import { validateParams, type ValidationOptions } from './select-promo/validate';
 import type { ModelResult, SelectPromoParams } from './select-promo/types';
 
 export interface ModelDefinition<Params> {
-  validate(params: unknown): { ok: true; params: Params } | { ok: false; error: string };
+  validate(params: unknown, opts?: ValidationOptions): { ok: true; params: Params } | { ok: false; error: string };
   handle(params: Params, deps: SelectPromoDeps): Promise<ModelResult>;
 }
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleSelectPromoList } from './handle-list';
 import type { SelectPromoDeps } from './handle';
 import type { ConfigService } from '../../services/config-service';
@@ -69,6 +69,28 @@ describe('handleSelectPromoList', () => {
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.steps.map((s) => s.id)).toEqual(['ok']);
+  });
+
+  it('propagates logged-out account identity to account-backed suppliers', async () => {
+    const profile = vi.fn(async (userId: string) => ({ userId, age: 30, region: 'ru' }));
+    const subscription = vi.fn(async () => ({ level: 'plus' as const }));
+    const listings = vi.fn(async () => ({ activeListings: 1 }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ sellerStatus: 'seller' })], persist: false }),
+    });
+    const result = await handleSelectPromoList({
+      userId: 'account-list',
+      user: { isAuthorized: false, identityKind: 'account' },
+    }, deps({
+      configService,
+      userService: { getUserProfile: profile },
+      billingService: { getSubscription: subscription },
+      listingService: { getListingStats: listings },
+    }));
+    expect(result.status).toBe('ok');
+    expect(profile).toHaveBeenCalledWith('account-list');
+    expect(subscription).toHaveBeenCalledTimes(1);
+    expect(listings).toHaveBeenCalledWith('account-list');
   });
 
   it('returns status "skipped" no_promo on an empty queue', async () => {
