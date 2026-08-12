@@ -29,6 +29,10 @@ services:
       # уходил на дефолт 3000 (src/config.ts:103). Держим явно здесь, иначе
       # витрина будет стучаться в закрытую дверь.
       PORT: "3191"
+      # OpenRouter blocks the production server's public IP. This optional
+      # proxy is read only by the two OpenRouter clients; Supabase, S3, and all
+      # other outbound traffic keep their direct routes. Leave empty locally.
+      OPENROUTER_PROXY: "${OPENROUTER_PROXY:-}"
       # На aaprod промо-данные живут в той же prod Supabase, что и Абхаз Авто.
       # environment имеет приоритет над env_file, поэтому legacy-значения
       # PROMO_SUPABASE_* из .env не смогут увести модели, показы и биллинг в

@@ -11,6 +11,7 @@
  * recorded RUB amount.
  */
 import { config as appConfig, type OpenrouterConfig } from '../config';
+import { openrouterFetch } from './openrouter-fetch';
 
 export interface OpenrouterCallParams {
   /** System prompt — instructions / role for the model. */
@@ -45,7 +46,7 @@ export interface OpenrouterClient {
 export interface OpenrouterClientOverrides {
   /** Override individual config fields (apiKey, model, prices, timeoutMs, …). */
   config?: Partial<OpenrouterConfig>;
-  /** Injected fetch — tests pass a vi.fn(), prod gets the global. */
+  /** Injected fetch — tests pass a vi.fn(), prod gets the OpenRouter transport. */
   fetchImpl?: typeof fetch;
   /** Optional HTTP-Referer header (OpenRouter shows it on leaderboards). */
   referer?: string;
@@ -57,7 +58,7 @@ const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 export function createOpenrouterClient(overrides: OpenrouterClientOverrides = {}): OpenrouterClient {
   const cfg: OpenrouterConfig = { ...appConfig.openrouter, ...overrides.config };
-  const fetchImpl = overrides.fetchImpl ?? fetch;
+  const fetchImpl = overrides.fetchImpl ?? openrouterFetch;
   const referer = overrides.referer;
   const appTitle = overrides.appTitle;
 

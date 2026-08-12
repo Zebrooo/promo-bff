@@ -172,6 +172,12 @@ impressions, and billing use the Abkhaz Auto production database even if legacy
 `PROMO_SUPABASE_*` values remain in `.env`. Compose fails before starting the
 container when either `AA_SUPABASE_*` source value is missing or empty.
 
+OpenRouter calls can use a dedicated HTTP proxy by setting `OPENROUTER_PROXY` in
+`.env`. Compose forwards the value unchanged; an empty value keeps direct fetch.
+The proxy applies only to the text and image OpenRouter clients, never to
+Supabase, S3, or other BFF traffic. Production must provide a proxy URL reachable
+from the `promo-bff` container.
+
 ```bash
 curl -X POST http://localhost:3000/models \
   -H 'Content-Type: application/json' \

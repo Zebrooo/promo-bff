@@ -11,6 +11,7 @@
  * URL to Supabase Storage so the cabinet UI can display a public https://...).
  */
 import { config as appConfig } from '../config';
+import { openrouterFetch } from './openrouter-fetch';
 
 export interface OpenrouterImageConfig {
   apiKey: string;
@@ -57,7 +58,7 @@ const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 export function createOpenrouterImageClient(overrides: OpenrouterImageClientOverrides = {}): OpenrouterImageClient {
   const cfg: OpenrouterImageConfig = { ...appConfig.openrouterImage, ...overrides.config };
-  const fetchImpl = overrides.fetchImpl ?? fetch;
+  const fetchImpl = overrides.fetchImpl ?? openrouterFetch;
   const referer = overrides.referer;
   const appTitle = overrides.appTitle;
 
