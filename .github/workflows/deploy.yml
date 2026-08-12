@@ -1,0 +1,87 @@
+# Деплой promo-bff: сборка и запуск ПРЯМО на прод-сервере (тот же self-hosted
+# раннер, что и целевой контейнер) — ghcr не участвует, окружение одно.
+#
+# Код деплоя живёт в /data/promo-bff (постоянный git-checkout на сервере,
+# НЕ рабочая копия раннера) — тот же паттерн, что у abkhaz-auto-web/bluegreen.sh:
+# раннер только триггерит, а настоящий деплой-каталог отдельный и переживает
+# между прогонами (докер-кэш слоёв, .env с прод-секретами, которых в гите нет).
+name: Deploy
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+concurrency:
+  group: deploy-promo-bff
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, ci]
+    timeout-minutes: 30
+    steps:
+      - name: Export NODE_AUTH_TOKEN
+        run: echo "NODE_AUTH_TOKEN=$(cat ~/.abkhaz-deploy-token)" >> "$GITHUB_ENV"
+
+      - name: Подтянуть код на сервере
+        id: code
+        run: |
+          set -euo pipefail
+          cd /data/promo-bff
+          exec 9>".deploy.lock"
+          flock -w 900 9 || { echo "::error::15 мин не дождался лока — идёт другой деплой?"; exit 1; }
+          git fetch origin main -q
+          git reset --hard origin/main -q
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "→ код: $(git log --oneline -1)"
+
+      - name: Запомнить текущий образ (для отката)
+        id: prev
+        run: |
+          set -euo pipefail
+          prev="$(docker inspect --format='{{.Image}}' promo-bff 2>/dev/null || true)"
+          echo "image=$prev" >> "$GITHUB_OUTPUT"
+          echo "→ текущий образ: ${prev:-<нет, первый деплой>}"
+
+      - name: Собрать образ
+        run: |
+          set -euo pipefail
+          cd /data/promo-bff
+          DOCKER_BUILDKIT=1 docker compose build
+
+      - name: Пересоздать контейнер
+        run: |
+          set -euo pipefail
+          cd /data/promo-bff
+          docker compose up -d --force-recreate
+
+      - name: Дождаться healthy
+        id: health
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' promo-bff 2>/dev/null || echo unknown)"
+            echo "[$i] status=$status"
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            if [ "$status" = "unhealthy" ]; then break; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Откат при провале health-check
+        if: failure() && steps.prev.outputs.image != ''
+        run: |
+          set -euo pipefail
+          cd /data/promo-bff
+          echo "::warning::health-check не прошёл, откатываю на предыдущий образ ${{ steps.prev.outputs.image }}"
+          docker tag "${{ steps.prev.outputs.image }}" promo-bff:latest
+          docker compose up -d --force-recreate
+          echo "::error::Деплой ${{ steps.code.outputs.sha }} провален, откачено на предыдущий образ. Логи: docker logs promo-bff"
+
+      - name: Зафиксировать успешный деплой
+        if: success()
+        run: |
+          cd /data/promo-bff
+          echo "${{ steps.code.outputs.sha }}" > .deployed-sha
+          echo "✓ promo-bff деплой ${{ steps.code.outputs.sha }} — healthy"

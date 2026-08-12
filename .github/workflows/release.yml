@@ -1,0 +1,81 @@
+# Релиз: кнопка ИЛИ пуш тега v* → approval-гейт (environment: production) →
+# deploy.yml → тег + GitHub Release. Тот же паттерн, что у abkhaz-auto (см.
+# release.yml там), упрощённый: одно окружение, без сборки в ghcr — deploy.yml
+# сам собирает образ прямо на сервере.
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: promo-bff-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, ci]
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${{ github.ref_name }}"
+          else
+            base="v$(date -u +%Y.%m.%d)"
+            tag="$base"
+            n=2
+            while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+              tag="${base}-${n}"; n=$((n + 1))
+            done
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "→ tag: $tag"
+
+  # Approval-гейт на GitHub Environment production — сейчас без required
+  # reviewers (не включены в настройках), поэтому проходит сразу же. Структура
+  # заведена на будущее — включить ревьюеров можно в любой момент в Settings →
+  # Environments → production, без правок этого файла.
+  gate:
+    needs: prepare
+    runs-on: [self-hosted, ci]
+    environment: production
+    steps:
+      - run: echo "Approved — proceeding to deploy ${{ needs.prepare.outputs.tag }}"
+
+  deploy:
+    needs: [prepare, gate]
+    uses: ./.github/workflows/deploy.yml
+
+  release:
+    needs: [prepare, deploy]
+    runs-on: [self-hosted, ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create tag + GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi
+          echo "✓ Released $TAG"
