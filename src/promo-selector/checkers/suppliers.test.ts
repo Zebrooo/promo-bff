@@ -29,7 +29,7 @@ function makeDeps(getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt:
   };
 }
 
-const ctx = { userId: 'u1', authenticated: true };
+const ctx = { userId: 'u1', identityKind: 'account' as const };
 
 beforeEach(() => {
   __clearUserDataCache();
@@ -56,36 +56,40 @@ describe('loadSuppliers', () => {
     expect(deps.impressionStore.getImpressions).not.toHaveBeenCalled();
   });
 
-  it('serves the cache within the TTL (one fetch for two loads)', async () => {
+  it('caches account metadata within the TTL but reads impressions fresh', async () => {
     const getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }));
     const deps = makeDeps(getImpressions);
     await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
     vi.advanceTimersByTime(USERDATA_TTL_MS - 1);
     await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
-    expect(getImpressions).toHaveBeenCalledTimes(1);
+    expect(deps.userService.getUserProfile).toHaveBeenCalledTimes(1);
+    expect(deps.billingService.getSubscription).toHaveBeenCalledTimes(1);
+    expect(getImpressions).toHaveBeenCalledTimes(2);
   });
 
-  it('refetches after the TTL expires', async () => {
+  it('refetches account metadata after the TTL expires', async () => {
     const getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }));
     const deps = makeDeps(getImpressions);
     await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
     vi.advanceTimersByTime(USERDATA_TTL_MS + 1);
     await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
+    expect(deps.userService.getUserProfile).toHaveBeenCalledTimes(2);
+    expect(deps.billingService.getSubscription).toHaveBeenCalledTimes(2);
     expect(getImpressions).toHaveBeenCalledTimes(2);
   });
 
   it('skips profile + billing for anonymous users (still loads impressions)', async () => {
     const deps = makeDeps();
-    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'anon', authenticated: false }, deps);
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'anon', identityKind: 'anonymous' }, deps);
     expect(deps.userService.getUserProfile).not.toHaveBeenCalled();
     expect(deps.billingService.getSubscription).not.toHaveBeenCalled();
     expect(deps.impressionStore.getImpressions).toHaveBeenCalledTimes(1);
     expect(data.userData).toEqual({ age: undefined, region: '', subscriptionLevel: 'none', impressionCounts: {}, lastShownAt: {} });
   });
 
-  it('loads profile + billing for authenticated users', async () => {
+  it('loads profile + billing for an account identity regardless of login state', async () => {
     const deps = makeDeps();
-    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', authenticated: true }, deps);
+    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', identityKind: 'account' }, deps);
     expect(deps.userService.getUserProfile).toHaveBeenCalledTimes(1);
     expect(deps.billingService.getSubscription).toHaveBeenCalledTimes(1);
   });
@@ -101,21 +105,18 @@ describe('loadSuppliers', () => {
     expect(deps.listingService.getListingStats).toHaveBeenCalledTimes(1);
   });
 
-  it('does not serve guest defaults to an authenticated request within the TTL (cache keyed by auth)', async () => {
+  it('keeps anonymous and account datasource caches isolated by identity kind', async () => {
     const deps = makeDeps();
-    // Same userId hits as a guest first — the cache stores neutral defaults…
-    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', authenticated: false }, deps);
+    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', identityKind: 'anonymous' }, deps);
     vi.advanceTimersByTime(1000);
-    // …then logs in within the TTL: the authenticated request must load the
-    // real profile + subscription, not the cached guest entry.
-    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', authenticated: true }, deps);
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'u1', identityKind: 'account' }, deps);
     expect(deps.userService.getUserProfile).toHaveBeenCalledTimes(1);
     expect(data.userData).toMatchObject({ region: 'ru', subscriptionLevel: 'plus' });
   });
 
   it('does not query listings for anonymous users (buyer by default)', async () => {
     const deps = makeDeps();
-    const data = await loadSuppliers([new NeedsListingStats() as Checker<SupplierId>], { userId: 'anon', authenticated: false }, deps);
+    const data = await loadSuppliers([new NeedsListingStats() as Checker<SupplierId>], { userId: 'anon', identityKind: 'anonymous' }, deps);
     expect(data.listingStats).toEqual({ activeListings: 0 });
     expect(deps.listingService.getListingStats).not.toHaveBeenCalled();
   });

@@ -17,25 +17,44 @@ export type ValidationResult =
   | { ok: true; params: SelectPromoParams }
   | { ok: false; error: string };
 
+export interface ValidationOptions {
+  /** Verifies a signed account-continuity proof against the effective user id. */
+  verifyIdentityProof?: (proof: string, expectedSub: string) => boolean;
+}
+
 /**
  * Validates the `params` of a select-promo request.
  * A user id is required: either params.userId or params.user.id.
  */
-export function validateParams(params: unknown): ValidationResult {
+export function validateParams(params: unknown, opts: ValidationOptions = {}): ValidationResult {
   if (typeof params !== 'object' || params === null) {
     return { ok: false, error: 'params must be an object' };
   }
 
   const p = params as Record<string, unknown>;
 
-  // Resolve the effective userId: top-level params.userId takes precedence over params.user.id
+  // Resolve one unambiguous datasource identity. A mismatch must not silently
+  // read profile data for one id and impression data for another.
   const topLevelUserId = p.userId;
-  const userObj = typeof p.user === 'object' && p.user !== null ? (p.user as Record<string, unknown>) : null;
+  if (p.user !== undefined && (typeof p.user !== 'object' || p.user === null || Array.isArray(p.user))) {
+    return { ok: false, error: 'params.user must be an object' };
+  }
+  const userObj = p.user === undefined ? null : (p.user as Record<string, unknown>);
   const inlineUserId = userObj?.id;
 
-  const userId = typeof topLevelUserId === 'string' && topLevelUserId.trim() !== ''
+  if (topLevelUserId !== undefined && (typeof topLevelUserId !== 'string' || topLevelUserId.trim() === '')) {
+    return { ok: false, error: 'params.userId is required and must be a non-empty string' };
+  }
+  if (inlineUserId !== undefined && (typeof inlineUserId !== 'string' || inlineUserId.trim() === '')) {
+    return { ok: false, error: 'params.user.id must be a non-empty string' };
+  }
+  if (typeof topLevelUserId === 'string' && typeof inlineUserId === 'string' && topLevelUserId !== inlineUserId) {
+    return { ok: false, error: 'params.userId and params.user.id must match when both are provided' };
+  }
+
+  const userId = typeof topLevelUserId === 'string'
     ? topLevelUserId
-    : typeof inlineUserId === 'string' && inlineUserId.trim() !== ''
+    : typeof inlineUserId === 'string'
       ? inlineUserId
       : null;
 
@@ -116,12 +135,52 @@ export function validateParams(params: unknown): ValidationResult {
   }
 
   if (userObj !== null) {
-    // Strict: a stringly "false" would coerce truthy downstream and flip the
-    // audience gate; only an actual boolean (or absence) is accepted.
+    if (userObj.isAuthorized !== undefined && typeof userObj.isAuthorized !== 'boolean') {
+      return { ok: false, error: 'params.user.isAuthorized must be a boolean' };
+    }
     if (userObj.authenticated !== undefined && typeof userObj.authenticated !== 'boolean') {
       return { ok: false, error: 'params.user.authenticated must be a boolean' };
     }
-    result.user = userObj as SelectPromoParams['user'];
+    if (
+      userObj.isAuthorized !== undefined &&
+      userObj.authenticated !== undefined &&
+      userObj.isAuthorized !== userObj.authenticated
+    ) {
+      return { ok: false, error: 'params.user.isAuthorized conflicts with params.user.authenticated' };
+    }
+    if (
+      userObj.identityKind !== undefined &&
+      userObj.identityKind !== 'account' &&
+      userObj.identityKind !== 'anonymous'
+    ) {
+      return { ok: false, error: "params.user.identityKind must be 'account' or 'anonymous'" };
+    }
+    if (userObj.identityProof !== undefined && (typeof userObj.identityProof !== 'string' || userObj.identityProof === '')) {
+      return { ok: false, error: 'params.user.identityProof must be a non-empty string' };
+    }
+
+    const isAuthorized = (userObj.isAuthorized ?? userObj.authenticated ?? false) as boolean;
+    const identityKind = (userObj.identityKind ?? (isAuthorized ? 'account' : 'anonymous')) as 'account' | 'anonymous';
+    if (isAuthorized && identityKind === 'anonymous') {
+      return { ok: false, error: "params.user.identityKind cannot be 'anonymous' when isAuthorized is true" };
+    }
+    // New explicit account identities are privacy-sensitive, including while
+    // authorized: cryptographically bind the account id rather than trusting a
+    // request field. Omitted identityKind retains the legacy auth-derived
+    // behavior so the BFF can deploy before existing callers are upgraded.
+    if (userObj.identityKind === 'account') {
+      const proof = userObj.identityProof;
+      if (typeof proof !== 'string' || opts.verifyIdentityProof?.(proof, userId) !== true) {
+        return { ok: false, error: 'params.user account identity proof is invalid' };
+      }
+    }
+
+    // Canonical output: do not forward the legacy alias or arbitrary fields.
+    result.user = {
+      ...(typeof inlineUserId === 'string' ? { id: inlineUserId } : {}),
+      isAuthorized,
+      identityKind,
+    };
   }
 
   return { ok: true, params: result };

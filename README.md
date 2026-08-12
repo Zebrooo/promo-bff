@@ -43,6 +43,24 @@ as `200 + {status:"error"}`, never a 5xx — the client can tell "no promo" apar
 
 `parse JSON → authenticate → validate → execute → respond`
 
+### User identity contract
+
+`params.user.isAuthorized` is the canonical current-login flag and controls only
+the `audience` checker. Legacy callers may still send `authenticated`; the BFF
+normalizes it to `isAuthorized` and rejects conflicting values. `identityKind`
+(`account` or `anonymous`) independently controls profile, billing and listing
+DataSync, so a verified account identity remains usable after logout while
+`isAuthorized:false` correctly leaves the authenticated audience.
+
+An explicit `identityKind:"account"` requires a detached Ed25519 proof bound to
+`user.id`, the authenticated service-ticket `src`, this BFF's `dst`, and a
+maximum 60-second validity window. It reuses `PROMO_TICKET_PUBLIC_KEY`; no new
+secret is needed. For BFF-first rollout compatibility, requests that omit
+`identityKind` retain the legacy behavior (`authenticated:true` means account,
+otherwise anonymous). Impressions are never TTL-cached: cooldown/frequency reads
+the shared store on every selection, immediately after `/impressions` and across
+BFF instances.
+
 ## select-promo logic
 
 1. Load promos + checker config from **Bunker** (`config-service`).

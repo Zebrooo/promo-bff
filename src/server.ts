@@ -39,6 +39,7 @@ import { createCostLog } from './services/cost-log';
 import { createChargeService, parseCampaignId, type ChargeService } from './services/charge-service';
 import { handleSupportMessage, handleSupportCallback } from './services/support-service';
 import metricsPlugin from 'fastify-metrics';
+import { createIdentityProofVerifier, type IdentityProofVerifier } from './identity-proof';
 
 interface ModelsRequestBody {
   models?: unknown;
@@ -47,6 +48,8 @@ interface ModelsRequestBody {
 
 export interface BuildServerOptions {
   authenticator?: Authenticator;
+  /** Test/embedding override; production derives this from service-ticket config. */
+  identityProofVerifier?: IdentityProofVerifier;
   /** Override service clients (used by tests to inject failing dependencies). */
   deps?: Partial<
     SelectPromoDeps &
@@ -117,6 +120,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // buildServer() is called multiple times in tests (prevents "already registered" errors).
   app.register(metricsPlugin, { endpoint: '/metrics', clearRegisterOnInit: true });
   const authenticator = opts.authenticator ?? defaultAuthenticator();
+  const identityProofVerifier = opts.identityProofVerifier ?? (
+    config.auth.ticketPublicKey
+      ? createIdentityProofVerifier({
+          publicKey: config.auth.ticketPublicKey,
+          expectedDst: config.auth.serviceName,
+        })
+      : undefined
+  );
 
   // Checker-observability aggregator — counts every checker verdict per promo per
   // queue and batch-writes promo_checker_stats to the AA Supabase once a minute
@@ -298,7 +309,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     for (const name of models as string[]) {
       if (!isModelName(name)) continue; // already validated; keeps TS narrow
       const model = modelRegistry[name];
-      const validation = model.validate(params);
+      const validation = model.validate(params, {
+        verifyIdentityProof: identityProofVerifier && auth.clientId
+          ? (proof, expectedSub) => identityProofVerifier.verify(proof, expectedSub, auth.clientId as string)
+          : undefined,
+      });
       if (!validation.ok) {
         return reply.code(400).send({ error: 'bad_request', reason: validation.error });
       }
@@ -410,7 +425,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
     }
 
-    const validation = validateSelectPromoParams(request.body ?? {});
+    const validation = validateSelectPromoParams(request.body ?? {}, {
+      verifyIdentityProof: identityProofVerifier && auth.clientId
+        ? (proof, expectedSub) => identityProofVerifier.verify(proof, expectedSub, auth.clientId as string)
+        : undefined,
+    });
     if (!validation.ok) {
       return reply.code(400).send({ error: 'bad_request', reason: validation.error });
     }

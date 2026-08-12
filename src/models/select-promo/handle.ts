@@ -7,7 +7,7 @@ import type { CheckerStatsService } from '../../services/checker-stats';
 import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
-import type { Advertisement, ModelResult, SelectPromoParams } from './types';
+import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -77,6 +77,7 @@ export async function handleSelectPromo(
 ): Promise<ModelResult> {
   const { configService, userService, billingService, impressionStore, listingService, logger } = deps;
   const now = deps.now?.() ?? new Date();
+  const identity = resolveUserIdentity(params.user);
 
   const queueName = params.queue ?? 'main';
 
@@ -100,7 +101,8 @@ export async function handleSelectPromo(
       promos,
       {
         userId: params.userId,
-        authenticated: params.user?.authenticated ?? false,
+        isAuthorized: identity.isAuthorized,
+        identityKind: identity.identityKind,
         now,
         section: params.context?.section,
         category: params.context?.category,

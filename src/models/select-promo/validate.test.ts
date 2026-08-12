@@ -76,6 +76,67 @@ describe('validateParams', () => {
     expect(validateParams({ userId: 'u1', user: { authenticated: 1 } }).ok).toBe(false);
   });
 
+  it('rejects a non-boolean user.isAuthorized', () => {
+    const result = validateParams({ userId: 'u1', user: { isAuthorized: 'false' } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/isAuthorized must be a boolean/);
+  });
+
+  it('normalizes the legacy authenticated alias to canonical authorization + identity kind', () => {
+    const result = validateParams({ userId: 'u1', user: { authenticated: true } });
+    expect(result).toEqual({
+      ok: true,
+      params: { userId: 'u1', user: { isAuthorized: true, identityKind: 'account' } },
+    });
+  });
+
+  it('rejects conflicting canonical and legacy authorization flags', () => {
+    const result = validateParams({
+      userId: 'u1',
+      user: { isAuthorized: false, authenticated: true },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/conflicts/);
+  });
+
+  it('strictly validates identityKind and rejects authorized anonymous identity', () => {
+    expect(validateParams({ userId: 'u1', user: { identityKind: 'device' } }).ok).toBe(false);
+    const result = validateParams({
+      userId: 'u1',
+      user: { isAuthorized: true, identityKind: 'anonymous' },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/cannot be 'anonymous'/);
+  });
+
+  it('accepts a signed logged-out account identity and keeps authorization false', () => {
+    const userId = '11111111-1111-4111-8111-111111111111';
+    const verifyIdentityProof = (proof: string, sub: string) => proof === 'signed-u1' && sub === userId;
+    const result = validateParams({
+      userId,
+      user: { id: userId, isAuthorized: false, identityKind: 'account', identityProof: 'signed-u1' },
+    }, { verifyIdentityProof });
+    expect(result).toEqual({
+      ok: true,
+      params: {
+        userId,
+        user: { id: userId, isAuthorized: false, identityKind: 'account' },
+      },
+    });
+  });
+
+  it('rejects an explicit account identity without a proof bound to the same user id', () => {
+    const verifyIdentityProof = (_proof: string, sub: string) => sub === 'another-user';
+    expect(validateParams({
+      userId: 'u1',
+      user: { isAuthorized: false, identityKind: 'account', identityProof: 'wrong' },
+    }, { verifyIdentityProof }).ok).toBe(false);
+    expect(validateParams({
+      userId: 'u1',
+      user: { isAuthorized: true, identityKind: 'account' },
+    }).ok).toBe(false);
+  });
+
   it('accepts user.authenticated when boolean or absent', () => {
     expect(validateParams({ userId: 'u1', user: { authenticated: false } }).ok).toBe(true);
     expect(validateParams({ userId: 'u1', user: { id: 'u1' } }).ok).toBe(true);
@@ -105,7 +166,7 @@ describe('validateParams', () => {
     const result = validateParams({ userId: 'u1', user: { authenticated: true } });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.params.user?.authenticated).toBe(true);
+      expect(result.params.user).toEqual({ isAuthorized: true, identityKind: 'account' });
     }
   });
 
@@ -134,10 +195,10 @@ describe('validateParams', () => {
     expect(validateParams({ userId: 'u1', device: 1 }).ok).toBe(false);
   });
 
-  it('top-level userId takes precedence over params.user.id', () => {
+  it('rejects mismatched top-level userId and params.user.id', () => {
     const result = validateParams({ userId: 'top', user: { id: 'inner' } });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.params.userId).toBe('top');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/must match/);
   });
 
   it('accepts a valid excludeIds array', () => {

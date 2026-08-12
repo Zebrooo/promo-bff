@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { register as promRegister } from 'prom-client';
 import type { LightMyRequestResponse } from 'fastify';
+import { createPrivateKey, sign as edSign } from 'node:crypto';
+import { generateKeyPair, issueServiceTicket } from '@zebrooo/service-ticket';
 import { buildServer } from './server';
+import { createTicketAuthenticator } from './auth-ticket';
+import { createIdentityProofVerifier } from './identity-proof';
 
 beforeEach(() => { promRegister.clear(); });
 afterEach(() => { promRegister.clear(); });
@@ -34,6 +38,27 @@ const post = (
 ) => app.inject({ method: 'POST', url: '/models', headers, payload: payload as object });
 
 const body = (res: LightMyRequestResponse) => res.json();
+
+const identityKeys = generateKeyPair();
+const identityPrivateKey = createPrivateKey({
+  key: Buffer.from(identityKeys.privateKey, 'base64'),
+  format: 'der',
+  type: 'pkcs8',
+});
+
+function issueIdentityProof(opts: {
+  userId: string;
+  src?: string;
+  iat?: number;
+  exp?: number;
+}): string {
+  const src = opts.src ?? 'abkhaz-auto';
+  const iat = opts.iat ?? Math.floor(Date.now() / 1000);
+  const exp = opts.exp ?? iat + 60;
+  const canonical = ['promo-account-continuity', opts.userId, String(iat), String(exp), src, 'promo-bff'].join('\0');
+  const signature = edSign(null, Buffer.from(canonical), identityPrivateKey).toString('base64url');
+  return `pi1.${iat}.${exp}.${signature}`;
+}
 
 describe('POST /models', () => {
   it('returns 401 when the request is not authorized', async () => {
@@ -105,6 +130,67 @@ describe('POST /models', () => {
   });
 });
 
+describe('POST /models account identity proof boundary', () => {
+  const authenticator = createTicketAuthenticator({
+    publicKey: identityKeys.publicKey,
+    expectedDst: 'promo-bff',
+    // `other-web` is intentionally authenticated too: proof verification must
+    // still bind identity to the actual ticket src instead of trusting payload.
+    allowedSrc: ['abkhaz-auto', 'other-web'],
+  });
+  const identityProofVerifier = createIdentityProofVerifier({
+    publicKey: identityKeys.publicKey,
+    expectedDst: 'promo-bff',
+  });
+  const headersFor = (src: string) => ({
+    'x-service-ticket': issueServiceTicket({
+      src,
+      dst: 'promo-bff',
+      privateKey: identityKeys.privateKey,
+    }),
+  });
+  const requestFor = (userId: string, identityProof: string) => ({
+    models: ['select-promo'],
+    params: {
+      userId,
+      user: { id: userId, isAuthorized: false, identityKind: 'account', identityProof },
+    },
+  });
+  const build = () => buildServer({
+    logger: false,
+    authenticator,
+    identityProofVerifier,
+    deps: fakeConfig(),
+  });
+
+  it('accepts a logged-out account with a proof bound to id + authenticated ticket src', async () => {
+    const app = build();
+    const userId = '11111111-1111-4111-8111-111111111111';
+    const res = await post(app, requestFor(userId, issueIdentityProof({ userId })), headersFor('abkhaz-auto'));
+    expect(res.statusCode).toBe(200);
+    expect(body(res)['select-promo'].status).toBe('ok');
+    await app.close();
+  });
+
+  it.each([
+    ['different service-ticket src', (id: string) => ({ proof: issueIdentityProof({ userId: id }), src: 'other-web' })],
+    ['different account subject', () => ({ proof: issueIdentityProof({ userId: 'other-account' }), src: 'abkhaz-auto' })],
+    ['tampered proof', (id: string) => ({ proof: `${issueIdentityProof({ userId: id })}x`, src: 'abkhaz-auto' })],
+    ['expired proof', (id: string) => {
+      const now = Math.floor(Date.now() / 1000);
+      return { proof: issueIdentityProof({ userId: id, iat: now - 120, exp: now - 60 }), src: 'abkhaz-auto' };
+    }],
+  ])('rejects %s', async (_label, makeInvalid) => {
+    const app = build();
+    const userId = '11111111-1111-4111-8111-111111111111';
+    const invalid = makeInvalid(userId);
+    const res = await post(app, requestFor(userId, invalid.proof), headersFor(invalid.src));
+    expect(res.statusCode).toBe(400);
+    expect(body(res).reason).toMatch(/identity proof is invalid/);
+    await app.close();
+  });
+});
+
 describe('fail-closed auth', () => {
   // In the test env PROMO_TICKET_PUBLIC_KEY is unset, so the default authenticator
   // would fall back to the stub. That is acceptable for dev/test but catastrophic
@@ -172,6 +258,43 @@ describe('POST /impressions', () => {
     expect(res.statusCode).toBe(200);
     expect(body(res)).toEqual({ ok: true });
     expect(calls).toEqual([['u1', 'p1']]);
+    await app.close();
+  });
+
+  it('applies a recorded impression to the immediately following /models cooldown check', async () => {
+    let count = 0;
+    let lastShownAt: string | undefined;
+    const promo = makePromo({ id: 'cooldown-promo', cooldownHours: 24 });
+    const app = buildServer({
+      logger: false,
+      deps: {
+        ...fakeConfig([promo]),
+        impressionStore: {
+          getImpressions: async () => ({
+            counts: count === 0 ? {} : { [promo.id]: count },
+            lastShownAt: lastShownAt ? { [promo.id]: lastShownAt } : {},
+          }),
+          recordImpression: async () => {
+            count += 1;
+            lastShownAt = new Date().toISOString();
+          },
+        },
+      },
+    });
+    const selectPayload = { models: ['select-promo'], params: { userId: 'cooldown-user' } };
+
+    const first = await post(app, selectPayload);
+    expect(first.statusCode).toBe(200);
+    expect(body(first)['select-promo'].status).toBe('ok');
+
+    const recorded = await postImp(app, { userId: 'cooldown-user', promoId: promo.id });
+    expect(recorded.statusCode).toBe(200);
+
+    // Regression: userData used to cache the empty impression snapshot for 60s,
+    // so this tight follow-up selected the promo again until the cache expired.
+    const immediate = await post(app, selectPayload);
+    expect(immediate.statusCode).toBe(200);
+    expect(body(immediate)['select-promo']).toEqual({ status: 'skipped', reason: 'no_promo' });
     await app.close();
   });
 

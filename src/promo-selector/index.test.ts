@@ -15,7 +15,12 @@ function makeDeps(over: Partial<{ counts: Record<string, number>; lastShownAt: R
   };
 }
 
-const ctx = { userId: 'u1', authenticated: false, now: new Date('2024-06-01T12:00:00.000Z') };
+const ctx = {
+  userId: 'u1',
+  isAuthorized: false,
+  identityKind: 'anonymous' as const,
+  now: new Date('2024-06-01T12:00:00.000Z'),
+};
 
 describe('selectPromo', () => {
   it('returns the first promo passing every checker, in queue order', async () => {

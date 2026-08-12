@@ -1,4 +1,5 @@
 import type { Promo } from './types';
+import type { IdentityKind } from './checkers/Checker';
 import {
   Checker,
   loadSuppliers,
@@ -45,7 +46,10 @@ export interface SelectionTrace {
 
 export interface SelectPromoContext {
   userId: string;
-  authenticated: boolean;
+  /** Current login state; affects the audience checker only. */
+  isAuthorized: boolean;
+  /** Stable identity source; controls account-backed suppliers. */
+  identityKind: IdentityKind;
   now: Date;
   section?: string;
   category?: string;
@@ -83,7 +87,7 @@ async function prepareWalk(promos: Promo[], ctx: SelectPromoContext, opts: Selec
   // walk, so an excluded promo can't win even when it passes every checker.
   const excludeIds = ctx.excludeIds ?? [];
   const candidates = excludeIds.length > 0 ? promos.filter((p) => !excludeIds.includes(p.id)) : promos;
-  const data = await loadSuppliers(active, { userId: ctx.userId, authenticated: ctx.authenticated }, opts.deps);
+  const data = await loadSuppliers(active, { userId: ctx.userId, identityKind: ctx.identityKind }, opts.deps);
   // Trace is collected only when a consumer asked for it; the extra shouldSkip()
   // classification call is pure/cheap by the Checker contract, and run() itself
   // stays the single source of truth for the actual pass/fail decision.
@@ -117,7 +121,7 @@ async function evaluateCandidate(
   const ctxP: CheckContext = {
     promo,
     userId: ctx.userId,
-    authenticated: ctx.authenticated,
+    isAuthorized: ctx.isAuthorized,
     now: ctx.now,
     section: ctx.section,
     category: ctx.category,

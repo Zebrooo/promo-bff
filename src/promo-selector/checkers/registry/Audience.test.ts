@@ -11,12 +11,12 @@ describe('AudienceChecker', () => {
   });
   it('authenticated gate: passes only for logged-in users', () => {
     const promo = makePromo({ audience: 'authenticated' });
-    expect(c.check(makeCheckContext({ promo, authenticated: true }))).toBe(true);
-    expect(c.check(makeCheckContext({ promo, authenticated: false }))).toBe(false);
+    expect(c.check(makeCheckContext({ promo, isAuthorized: true }))).toBe(true);
+    expect(c.check(makeCheckContext({ promo, isAuthorized: false }))).toBe(false);
   });
   it('anonymous gate: passes only for guests', () => {
     const promo = makePromo({ audience: 'anonymous' });
-    expect(c.check(makeCheckContext({ promo, authenticated: false }))).toBe(true);
-    expect(c.check(makeCheckContext({ promo, authenticated: true }))).toBe(false);
+    expect(c.check(makeCheckContext({ promo, isAuthorized: false }))).toBe(true);
+    expect(c.check(makeCheckContext({ promo, isAuthorized: true }))).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import type { Promo } from '../../promo-selector/types';
 import { selectPromoList, type SelectionTrace } from '../../promo-selector';
 import { stripToAdvertisement, recordTraceObservability, type SelectPromoDeps } from './handle';
-import type { PromoListResult, SelectPromoParams } from './types';
+import { resolveUserIdentity, type PromoListResult, type SelectPromoParams } from './types';
 
 /**
  * select-promo-list model: like handleSelectPromo but returns the WHOLE ordered,
@@ -22,6 +22,7 @@ export async function handleSelectPromoList(
 ): Promise<PromoListResult> {
   const { configService, userService, billingService, impressionStore, listingService, logger } = deps;
   const now = deps.now?.() ?? new Date();
+  const identity = resolveUserIdentity(params.user);
   const queueName = params.queue ?? 'main';
 
   let promos: Promo[];
@@ -46,7 +47,8 @@ export async function handleSelectPromoList(
       promos,
       {
         userId: params.userId,
-        authenticated: params.user?.authenticated ?? false,
+        isAuthorized: identity.isAuthorized,
+        identityKind: identity.identityKind,
         now,
         section: params.context?.section,
         category: params.context?.category,
