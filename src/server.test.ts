@@ -346,6 +346,52 @@ describe('POST /auction', () => {
     await app.close();
   });
 
+  it('returns only the image variant selected for the requested slot dimensions', async () => {
+    const app = buildServer({ logger: false, deps: {
+      campaignService: {
+        getCampaignsForSlot: async () => [],
+        getActiveBannerCampaigns: async () => [
+          {
+            id: 1,
+            advertiserId: 'a',
+            cpmKopecks: 9000,
+            creative: {
+              format: 'banner',
+              title: 'B',
+              imageUrl: 'https://i/legacy.png',
+              imageVariants: {
+                wide: { imageUrl: 'https://i/wide.png', width: 1200, height: 150 },
+                compact: { imageUrl: 'https://i/compact.png', width: 580, height: 120 },
+              },
+            },
+            spentKopecks: 0,
+            totalBudgetKopecks: null,
+            targetPages: null,
+            bannerFormat: 'horizontal',
+          },
+        ],
+      },
+      balanceService: { getBalances: async () => new Map([['a', 10]]) },
+    } });
+    const res = await postAuction(app, {
+      slots: [{ slot: 'home-top-1', weight: 1, format: 'horizontal', width: 580, height: 120 }],
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()['home-top-1']).toMatchObject({
+      id: 'campaign:1',
+      imageUrl: 'https://i/compact.png',
+    });
+    expect(res.json()['home-top-1']).not.toHaveProperty('imageVariants');
+    await app.close();
+  });
+
+  it('rejects an auction slot with only one dimension', async () => {
+    const app = buildServer({ logger: false });
+    const res = await postAuction(app, { slots: [{ slot: 'home-top-1', weight: 1, width: 580 }] });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
   it('rejects /auction with no slots (400)', async () => {
     const app = buildServer({ logger: false });
     const res = await app.inject({ method: 'POST', url: '/auction', headers: AUTH, payload: {} });

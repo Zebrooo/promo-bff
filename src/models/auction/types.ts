@@ -7,6 +7,10 @@ export interface AuctionPositionParam {
   /** Size-format family (horizontal|block|vertical); only candidates whose
    *  bannerFormat matches may fill this position. Omitted = legacy any-format. */
   format?: string;
+  /** Actual rendered slot size. Must be supplied as a width+height pair; the
+   *  winning horizontal creative uses it to select one server-side image variant. */
+  width?: number;
+  height?: number;
 }
 
 export interface AuctionParams {

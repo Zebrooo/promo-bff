@@ -52,6 +52,67 @@ describe('campaignToAd', () => {
     expect(ad!.action).toEqual({ href: 'https://shop', label: 'Go' });
   });
 
+  it('selects one closest-aspect image for the requested slot without exposing variants', () => {
+    const candidate = {
+      ...cand({
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageVariants: {
+        wide: { imageUrl: 'https://x/wide.png', width: 1200, height: 150 },
+        compact: { imageUrl: 'https://x/compact.png', width: 580, height: 120 },
+      },
+      }),
+      bannerFormat: 'horizontal',
+    };
+
+    const wide = campaignToAd(candidate, { width: 820, height: 96 });
+    const compact = campaignToAd(candidate, { width: 580, height: 120 });
+
+    expect(wide?.imageUrl).toBe('https://x/wide.png');
+    expect(compact?.imageUrl).toBe('https://x/compact.png');
+    expect(wide).not.toHaveProperty('imageVariants');
+    expect(compact).not.toHaveProperty('imageVariants');
+  });
+
+  it('falls back to the canonical image for legacy requests or a malformed variant pair', () => {
+    const partial = {
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageVariants: {
+        wide: { imageUrl: 'https://x/wide.png', width: 1200, height: 150 },
+      },
+    };
+    const malformed = {
+      ...partial,
+      imageVariants: {
+        wide: { imageUrl: 'https://x/wide.png', width: 0, height: 150 },
+        compact: { imageUrl: 'https://x/compact.png', width: 580, height: 120 },
+      },
+    };
+
+    const horizontalPartial = { ...cand(partial), bannerFormat: 'horizontal' };
+    const horizontalMalformed = { ...cand(malformed), bannerFormat: 'horizontal' };
+    expect(campaignToAd(horizontalPartial)?.imageUrl).toBe('https://x/legacy.png');
+    expect(campaignToAd(horizontalPartial, { width: 580, height: 120 })?.imageUrl).toBe('https://x/legacy.png');
+    expect(campaignToAd(horizontalMalformed, { width: 580, height: 120 })?.imageUrl).toBe('https://x/legacy.png');
+  });
+
+  it('ignores adaptive image metadata on a non-horizontal banner', () => {
+    const candidate = cand({
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageVariants: {
+        wide: { imageUrl: 'https://x/wide.png', width: 1200, height: 150 },
+        compact: { imageUrl: 'https://x/compact.png', width: 580, height: 120 },
+      },
+    });
+
+    expect(campaignToAd(candidate, { width: 580, height: 120 })?.imageUrl).toBe('https://x/legacy.png');
+  });
+
   it('returns null when title is missing or blank', () => {
     expect(campaignToAd(cand({ format: 'popup' }))).toBeNull();
     expect(campaignToAd(cand({ format: 'popup', title: '   ' }))).toBeNull();

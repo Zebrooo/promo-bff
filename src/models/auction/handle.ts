@@ -10,7 +10,6 @@ import type { BalanceService } from '../../services/balance-service';
 import { allocateAuction } from '../../auction/run-auction';
 import { campaignToAd } from '../../auction/campaign-to-ad';
 import type { AuctionParams, AuctionResult, AuctionBatchData } from './types';
-import type { Advertisement } from '../select-promo/types';
 
 export interface Logger {
   info(obj: unknown, msg?: string): void;
@@ -34,16 +33,14 @@ export async function handleAuction(params: AuctionParams, deps: AuctionDeps): P
     return { status: 'error', reason: 'campaign_service_unavailable' };
   }
 
-  // Render each creative once; drop malformed ones before ranking so a broken
+  // Validate each creative once; drop malformed ones before ranking so a broken
   // high bid can't take a slot from a valid lower bid.
-  const ads = new Map<number, Advertisement>();
   const renderable = candidates.filter((c) => {
     const ad = campaignToAd(c);
     if (ad === null) {
       logger?.error({ campaignId: c.id }, 'auction: malformed creative, excluded');
       return false;
     }
-    ads.set(c.id, ad);
     return true;
   });
 
@@ -59,9 +56,11 @@ export async function handleAuction(params: AuctionParams, deps: AuctionDeps): P
   const winners = allocateAuction(renderable, params.slots, { balances, page: params.page });
 
   const data: AuctionBatchData = {};
-  for (const { slot } of params.slots) {
+  for (const position of params.slots) {
+    const { slot, width, height } = position;
     const c = winners.get(slot);
-    data[slot] = c ? ads.get(c.id)! : null;
+    const target = width !== undefined && height !== undefined ? { width, height } : undefined;
+    data[slot] = c ? campaignToAd(c, target) : null;
   }
   return { status: 'ok', data };
 }

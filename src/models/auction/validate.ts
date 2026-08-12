@@ -1,5 +1,7 @@
 import type { AuctionParams, AuctionPositionParam, FeedFillParams } from './types';
 
+const MAX_SLOT_DIMENSION = 10_000;
+
 export type ValidationResult =
   | { ok: true; params: AuctionParams }
   | { ok: false; error: string };
@@ -24,6 +26,30 @@ export function validateAuctionParams(body: unknown): ValidationResult {
     if (s.format !== undefined) {
       if (typeof s.format !== 'string') return { ok: false, error: 'slot.format must be a string' };
       pos.format = s.format;
+    }
+    const hasWidth = s.width !== undefined;
+    const hasHeight = s.height !== undefined;
+    if (hasWidth !== hasHeight) {
+      return { ok: false, error: 'slot.width and slot.height must be provided together' };
+    }
+    if (hasWidth && hasHeight) {
+      if (
+        typeof s.width !== 'number' ||
+        typeof s.height !== 'number' ||
+        !Number.isInteger(s.width) ||
+        !Number.isInteger(s.height) ||
+        s.width <= 0 ||
+        s.height <= 0 ||
+        s.width > MAX_SLOT_DIMENSION ||
+        s.height > MAX_SLOT_DIMENSION
+      ) {
+        return {
+          ok: false,
+          error: `slot.width and slot.height must be positive integers up to ${MAX_SLOT_DIMENSION}`,
+        };
+      }
+      pos.width = s.width;
+      pos.height = s.height;
     }
     slots.push(pos);
   }

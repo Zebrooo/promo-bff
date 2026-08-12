@@ -6,9 +6,9 @@
  *   - гарантирует webp в storage (витрина грузит его напрямую);
  *   - подгоняет кадр под пропорции слота.
  *
- * sharp импортируется ЛЕНИВО (dynamic import внутри функции): сервис стартует и
- * работает даже если sharp не установлен/не загрузился — на любой ошибке
- * возвращаем исходный data-URL как есть (модель уже отдала валидную картинку).
+ * sharp импортируется ЛЕНИВО (dynamic import внутри функции). Ошибка обработки
+ * возвращает null: downstream не вправе помечать исходник модели как точный
+ * W×H-вариант, иначе аукцион выберет его по ложным метаданным и снова обрежет.
  */
 const DATA_URL_RE = /^data:image\/([a-z0-9+.-]+);base64,(.+)$/i;
 
@@ -17,21 +17,24 @@ export async function transcodeBannerToWebp(
   width: number,
   height: number,
   quality = 80,
-): Promise<string> {
+): Promise<string | null> {
   try {
     const m = DATA_URL_RE.exec(dataUrl);
-    if (!m) return dataUrl;
+    if (!m) return null;
     const { default: sharp } = await import('sharp');
     const input = Buffer.from(m[2], 'base64');
-    const out = await sharp(input, { failOn: 'none' })
+    const targetWidth = Math.round(width);
+    const targetHeight = Math.round(height);
+    const { data: out, info } = await sharp(input, { failOn: 'none' })
       .resize(Math.round(width), Math.round(height), {
         fit: 'cover',
         position: sharp.strategy.attention,
       })
       .webp({ quality })
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
+    if (info.width !== targetWidth || info.height !== targetHeight || info.format !== 'webp') return null;
     return `data:image/webp;base64,${out.toString('base64')}`;
   } catch {
-    return dataUrl; // sharp отсутствует/ошибка → passthrough, сервис не падает
+    return null;
   }
 }

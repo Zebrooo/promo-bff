@@ -80,8 +80,13 @@ export async function runBannerImage(
     return { status: 'error', reason: 'malformed_response' };
   }
 
-  // Транскод в webp + умный кроп под слот. На ошибке/без sharp — passthrough.
+  // Транскод в webp + умный кроп под слот. Fail-closed: без подтверждённого
+  // точного W×H этот результат нельзя сохранять как адаптивный вариант.
   const imageDataUrl = await transcodeBannerToWebp(result.imageDataUrl, req.width, req.height);
+  if (!imageDataUrl) {
+    logger?.error({}, `${req.label}: image transcode failed`);
+    return { status: 'error', reason: 'image_unavailable' };
+  }
 
   imageCache.set(req.cacheKey, { imageDataUrl, model: result.model });
   try {
