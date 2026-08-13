@@ -66,7 +66,7 @@ export async function handleSelectPromoList(
         searchHistory,
         purchases: wallet.purchases,
         walletBalanceKopecks: wallet.walletBalanceKopecks,
-        walletMovementKopecks: wallet.walletMovementKopecks,
+        walletMovementByWindow: wallet.walletMovementByWindow,
       },
       {
         skip,

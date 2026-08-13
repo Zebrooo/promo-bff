@@ -31,8 +31,8 @@ export interface CheckContext {
   purchases?: PurchaseEntry[];
   /** Текущий остаток кошелька, kopecks. undefined = нет счёта/не загружали. */
   walletBalanceKopecks?: number;
-  /** Сумма движения по кошельку за окно, запрошенное чекерами очереди. */
-  walletMovementKopecks?: number;
+  /** Net wallet movement per requested window. Key = the rule's `movementLookbackDays` (undefined key = all-time). */
+  walletMovementByWindow?: Map<number | undefined, number>;
 }
 
 export interface SearchHistoryEntry {

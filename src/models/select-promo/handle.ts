@@ -79,8 +79,8 @@ export async function loadWalletDataForSelection(
   skip: string[],
   deps: SelectPromoDeps,
   logPrefix: 'select-promo' | 'select-promo-list',
-): Promise<{ purchases: PurchaseEntry[]; walletBalanceKopecks?: number; walletMovementKopecks?: number }> {
-  const empty = { purchases: [], walletBalanceKopecks: undefined, walletMovementKopecks: undefined };
+): Promise<{ purchases: PurchaseEntry[]; walletBalanceKopecks?: number; walletMovementByWindow: Map<number | undefined, number> }> {
+  const empty = { purchases: [], walletBalanceKopecks: undefined, walletMovementByWindow: new Map<number | undefined, number>() };
   if (!params.userId) return empty;
 
   const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
@@ -90,25 +90,23 @@ export async function loadWalletDataForSelection(
   const purchaseLookbackDays = needsPurchases
     ? Math.max(...promos.filter(hasPurchaseRule).map((p) => p.targeting.purchases!.lookbackDays ?? 30))
     : 0;
-  const movementLookbackDays = needsBalance
-    ? promos
-        .filter((p) => hasBalanceRule(p) && p.targeting.balance!.movementLookbackDays !== undefined)
-        .reduce<number | undefined>((max, p) => {
-          const d = p.targeting.balance!.movementLookbackDays!;
-          return max === undefined ? d : Math.max(max, d);
-        }, undefined)
-    : undefined;
-  const movementSinceMs = movementLookbackDays !== undefined
-    ? Date.now() - movementLookbackDays * 24 * 60 * 60 * 1000
-    : undefined;
   const needsCurrentBalance = needsBalance && promos.some(
     (p) => hasBalanceRule(p) && (p.targeting.balance!.currentAbove !== undefined || p.targeting.balance!.currentBelow !== undefined),
   );
-  const needsMovement = needsBalance && promos.some(
-    (p) => hasBalanceRule(p) && (p.targeting.balance!.movementAbove !== undefined || p.targeting.balance!.movementBelow !== undefined),
-  );
+  // Movement is pre-aggregated server-side per window, so (unlike purchases) it
+  // can't be re-filtered after the fact — fetch one value PER DISTINCT window any
+  // movement-gating promo actually requests (undefined = all-time bucket), not a
+  // single queue-wide max. Two promos in the same queue with different
+  // movementLookbackDays each get their own correct sum.
+  const movementWindows = needsBalance
+    ? [...new Set(
+        promos
+          .filter((p) => hasBalanceRule(p) && (p.targeting.balance!.movementAbove !== undefined || p.targeting.balance!.movementBelow !== undefined))
+          .map((p) => p.targeting.balance!.movementLookbackDays),
+      )]
+    : [];
 
-  const [purchases, balances, movement] = await Promise.all([
+  const [purchases, balances, movementEntries] = await Promise.all([
     needsPurchases
       ? deps.purchaseLedgerService.getPurchases(params.userId, Date.now() - purchaseLookbackDays * 24 * 60 * 60 * 1000).catch((err) => {
           deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: purchase history unavailable`);
@@ -121,18 +119,30 @@ export async function loadWalletDataForSelection(
           return new Map<string, number>();
         })
       : Promise.resolve(new Map<string, number>()),
-    needsMovement
-      ? deps.purchaseLedgerService.getMovement(params.userId, movementSinceMs).catch((err) => {
-          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: wallet movement unavailable`);
-          return undefined;
-        })
-      : Promise.resolve(undefined),
+    // Fetch each distinct window in parallel; a single window's failure degrades
+    // only that entry to "absent" (Balance checker then treats it as 0 movement)
+    // without rejecting the outer Promise.all or blocking purchases/balance.
+    Promise.all(
+      movementWindows.map(async (windowDays) => {
+        const sinceMs = windowDays !== undefined ? Date.now() - windowDays * 24 * 60 * 60 * 1000 : undefined;
+        try {
+          const value = await deps.purchaseLedgerService.getMovement(params.userId, sinceMs);
+          return [windowDays, value] as const;
+        } catch (err) {
+          deps.logger?.error(
+            { error: err instanceof Error ? err.message : 'unknown error', window: windowDays },
+            `${logPrefix}: wallet movement unavailable`,
+          );
+          return null;
+        }
+      }),
+    ),
   ]);
 
   return {
     purchases,
     walletBalanceKopecks: balances.get(params.userId),
-    walletMovementKopecks: movement,
+    walletMovementByWindow: new Map(movementEntries.filter((e): e is readonly [number | undefined, number] => e !== null)),
   };
 }
 
@@ -219,7 +229,7 @@ export async function handleSelectPromo(
         searchHistory,
         purchases: wallet.purchases,
         walletBalanceKopecks: wallet.walletBalanceKopecks,
-        walletMovementKopecks: wallet.walletMovementKopecks,
+        walletMovementByWindow: wallet.walletMovementByWindow,
       },
       {
         skip,

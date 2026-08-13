@@ -67,8 +67,8 @@ export interface SelectPromoContext {
   purchases?: PurchaseEntry[];
   /** Current wallet balance, preloaded once by the model handler. */
   walletBalanceKopecks?: number;
-  /** Wallet movement sum, preloaded once by the model handler. */
-  walletMovementKopecks?: number;
+  /** Net wallet movement per requested window, preloaded once by the model handler. */
+  walletMovementByWindow?: Map<number | undefined, number>;
 }
 
 export interface SelectPromoOptions {
@@ -140,7 +140,7 @@ async function evaluateCandidate(
     searchHistory: ctx.searchHistory,
     purchases: ctx.purchases,
     walletBalanceKopecks: ctx.walletBalanceKopecks,
-    walletMovementKopecks: ctx.walletMovementKopecks,
+    walletMovementByWindow: ctx.walletMovementByWindow,
   };
   const checks: CheckerTraceEntry[] = [];
   let passed = true;

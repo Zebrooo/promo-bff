@@ -21,7 +21,7 @@ export class BalanceChecker extends Checker {
     if (!ctx.isAuthorized) return false;
     const rule = ctx.promo.targeting.balance!;
     const current = ctx.walletBalanceKopecks ?? 0;
-    const movement = ctx.walletMovementKopecks ?? 0;
+    const movement = ctx.walletMovementByWindow?.get(rule.movementLookbackDays) ?? 0;
 
     if (rule.currentAbove !== undefined && current < rule.currentAbove) return false;
     if (rule.currentBelow !== undefined && current > rule.currentBelow) return false;
