@@ -26,11 +26,25 @@ export interface CheckContext {
   formats?: string[];
   /** Search rows preloaded once for the whole selection walk. */
   searchHistory?: SearchHistoryEntry[];
+  /** Покупки пакетов, преднагруженные на максимальное lookbackDays среди
+   *  промо в очереди. Каждый чекер сам фильтрует по своему окну. */
+  purchases?: PurchaseEntry[];
+  /** Текущий остаток кошелька, kopecks. undefined = нет счёта/не загружали. */
+  walletBalanceKopecks?: number;
+  /** Сумма движения по кошельку за окно, запрошенное чекерами очереди. */
+  walletMovementKopecks?: number;
 }
 
 export interface SearchHistoryEntry {
   query: string;
   section: string;
+  createdAt: string;
+}
+
+export interface PurchaseEntry {
+  pack: 'bump' | 'premium' | 'vip';
+  /** Всегда положительное число (модуль списания), kopecks. */
+  amountKopecks: number;
   createdAt: string;
 }
 
