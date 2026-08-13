@@ -5,7 +5,7 @@ import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
-import { makePromo } from '../../test-utils';
+import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
@@ -30,7 +30,7 @@ const fakeImpressionStore = (over: Partial<ImpressionStore> = {}): ImpressionSto
 });
 
 const fakeListingService = (over: Partial<ListingService> = {}): ListingService => ({
-  getListingStats: async () => ({ activeListings: 0 }),
+  getListingStats: async () => makeListingStats(0).listingStats,
   ...over,
 });
 
@@ -225,7 +225,7 @@ describe('handleSelectPromo', () => {
   it('uses isAuthorized only for audience while a logged-out account still loads profile, billing and listings', async () => {
     const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
     const subscription = vi.fn(async () => ({ level: 'plus' as const }));
-    const listings = vi.fn(async () => ({ activeListings: 2 }));
+    const listings = vi.fn(async () => makeListingStats(2).listingStats);
     const configService = fakeConfigService({
       getQueue: async () => ({ promos: [makePromo({ audience: 'all', sellerStatus: 'seller' })], persist: false }),
     });
@@ -268,7 +268,7 @@ describe('handleSelectPromo', () => {
   it('does not load account profile, billing or listings for an anonymous identity', async () => {
     const profile = vi.fn(async (userId: string) => ({ userId, age: 31, region: 'sukhum' }));
     const subscription = vi.fn(async () => ({ level: 'plus' as const }));
-    const listings = vi.fn(async () => ({ activeListings: 2 }));
+    const listings = vi.fn(async () => makeListingStats(2).listingStats);
     const configService = fakeConfigService({
       getQueue: async () => ({ promos: [makePromo({ audience: 'all', sellerStatus: 'seller' })], persist: false }),
     });
@@ -523,12 +523,12 @@ describe('handleSelectPromo', () => {
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
     const seller = await handleSelectPromo({ userId: 's1', user: { authenticated: true } }, deps({
       configService,
-      listingService: fakeListingService({ getListingStats: async () => ({ activeListings: 3 }) }),
+      listingService: fakeListingService({ getListingStats: async () => makeListingStats(3).listingStats }),
     }));
     expect(seller.status).toBe('ok');
     const buyer = await handleSelectPromo({ userId: 'b1', user: { authenticated: true } }, deps({
       configService,
-      listingService: fakeListingService({ getListingStats: async () => ({ activeListings: 0 }) }),
+      listingService: fakeListingService({ getListingStats: async () => makeListingStats(0).listingStats }),
     }));
     expect(buyer.status).toBe('skipped');
   });

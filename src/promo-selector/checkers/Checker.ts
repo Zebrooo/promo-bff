@@ -63,11 +63,8 @@ export interface UserData {
   lastShownAt: Record<string, string>;
 }
 
-/** Aggregated listing facts the listingStats supplier provides. */
-export interface ListingStats {
-  /** Count of the user's currently active listings (0 for anonymous/buyers). */
-  activeListings: number;
-}
+import type { ListingStats } from '../../services/listing-service';
+export type { ListingStats };
 
 interface SupplierTypeMap {
   userData: UserData;

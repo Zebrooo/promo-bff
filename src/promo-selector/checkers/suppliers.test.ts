@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadSuppliers, __clearUserDataCache, USERDATA_TTL_MS, type SupplierDeps } from './suppliers';
 import { Checker, type SupplierId } from './Checker';
+import { makeListingStats } from '../../test-utils';
 
 class NeedsUserData extends Checker<'userData'> {
   readonly name = 'needs';
@@ -25,7 +26,7 @@ function makeDeps(getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt:
     userService: { getUserProfile: vi.fn(async (id: string) => ({ userId: id, age: 30, region: 'ru' })) },
     billingService: { getSubscription: vi.fn(async () => ({ level: 'plus' as const })) },
     impressionStore: { getImpressions, recordImpression: vi.fn(async () => {}) },
-    listingService: { getListingStats: vi.fn(async () => ({ activeListings: 0 })) },
+    listingService: { getListingStats: vi.fn(async () => makeListingStats(0).listingStats) },
   };
 }
 
@@ -101,7 +102,7 @@ describe('loadSuppliers', () => {
     expect(deps.listingService.getListingStats).not.toHaveBeenCalled();
 
     const withLoad = await loadSuppliers([new NeedsListingStats() as Checker<SupplierId>], ctx, deps);
-    expect(withLoad.listingStats).toEqual({ activeListings: 0 });
+    expect(withLoad.listingStats).toEqual(makeListingStats(0).listingStats);
     expect(deps.listingService.getListingStats).toHaveBeenCalledTimes(1);
   });
 
@@ -117,7 +118,7 @@ describe('loadSuppliers', () => {
   it('does not query listings for anonymous users (buyer by default)', async () => {
     const deps = makeDeps();
     const data = await loadSuppliers([new NeedsListingStats() as Checker<SupplierId>], { userId: 'anon', identityKind: 'anonymous' }, deps);
-    expect(data.listingStats).toEqual({ activeListings: 0 });
+    expect(data.listingStats).toEqual(makeListingStats(0).listingStats);
     expect(deps.listingService.getListingStats).not.toHaveBeenCalled();
   });
 });

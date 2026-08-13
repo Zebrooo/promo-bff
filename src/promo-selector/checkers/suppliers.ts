@@ -90,7 +90,15 @@ async function loadUserData(userId: string, identityKind: IdentityKind, deps: Su
 
 function loadListingStats(userId: string, identityKind: IdentityKind, deps: SupplierDeps): Promise<ListingStats> {
   // Anonymous ids are not profiles.id/sellers → no listings; skip the query.
-  if (identityKind === 'anonymous') return Promise.resolve({ activeListings: 0 });
+  if (identityKind === 'anonymous') {
+    return Promise.resolve({
+      activeListings: 0,
+      everCategories: [],
+      activeCategories: [],
+      hasUnpromotedActive: false,
+      daysSinceLastListing: undefined,
+    });
+  }
   return cached('listingStats', userId, identityKind, () => deps.listingService.getListingStats(userId));
 }
 

@@ -6,7 +6,7 @@ import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
-import { makePromo } from '../../test-utils';
+import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
@@ -18,7 +18,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   userService: { getUserProfile: async (userId) => ({ userId, age: 30, region: 'ru' }) } as UserService,
   billingService: { getSubscription: async () => ({ level: 'plus' }) } as BillingService,
   impressionStore: { getImpressions: async () => ({ counts: {}, lastShownAt: {} }), recordImpression: async () => {} } as ImpressionStore,
-  listingService: { getListingStats: async () => ({ activeListings: 0 }) } as ListingService,
+  listingService: { getListingStats: async () => makeListingStats(0).listingStats } as ListingService,
   searchHistoryService: { getSearchHistory: async () => [] },
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
   balanceService: { getBalances: async () => new Map() },
@@ -77,7 +77,7 @@ describe('handleSelectPromoList', () => {
   it('propagates logged-out account identity to account-backed suppliers', async () => {
     const profile = vi.fn(async (userId: string) => ({ userId, age: 30, region: 'ru' }));
     const subscription = vi.fn(async () => ({ level: 'plus' as const }));
-    const listings = vi.fn(async () => ({ activeListings: 1 }));
+    const listings = vi.fn(async () => makeListingStats(1).listingStats);
     const configService = fakeConfigService({
       getQueue: async () => ({ promos: [makePromo({ sellerStatus: 'seller' })], persist: false }),
     });
