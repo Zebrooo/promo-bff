@@ -23,6 +23,8 @@ export interface AuctionCheckContext {
   balances: Map<string, number>;
   /** Page key the auction is filling; used by pageTargetCheck. */
   page?: string;
+  /** Clock override for deterministic daily-budget checks. Defaults to now. */
+  now?: Date;
   // SP4 added budgetCheck; SP5 adds batch allocation; SP6 adds page+format targeting.
 }
 
@@ -55,6 +57,40 @@ export const budgetCheck: AuctionEligibilityCheck = {
     c.spentKopecks + c.cpmKopecks <= c.totalBudgetKopecks,
 };
 
+const MOSCOW_DATE_FORMAT = new Intl.DateTimeFormat('en', {
+  timeZone: 'Europe/Moscow',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function moscowDateKey(value: Date): string {
+  const parts = MOSCOW_DATE_FORMAT.formatToParts(value);
+  const year = parts.find((part) => part.type === 'year')!.value;
+  const month = parts.find((part) => part.type === 'month')!.value;
+  const day = parts.find((part) => part.type === 'day')!.value;
+  return `${year}-${month}-${day}`;
+}
+
+function pinAuctionClock(ctx: AuctionCheckContext): AuctionCheckContext {
+  return ctx.now === undefined ? { ...ctx, now: new Date() } : ctx;
+}
+
+/**
+ * Mirrors record_campaign_impression from migration 0184: an active campaign
+ * stops winning only after its counter reaches the daily cap on the current
+ * Europe/Moscow date. A stale/null date means the DB counter resets on charge.
+ */
+export const dailyBudgetCheck: AuctionEligibilityCheck = {
+  name: 'daily-budget',
+  isEligible: (c, ctx) => {
+    if (c.dailyBudgetKopecks == null) return true;
+    const isCurrentDay = c.spentTodayDate === moscowDateKey(ctx.now ?? new Date());
+    const spentToday = isCurrentDay ? (c.spentTodayKopecks ?? 0) : 0;
+    return spentToday < c.dailyBudgetKopecks;
+  },
+};
+
 /** Campaign must target the requested page (null/empty target = all pages). */
 export const pageTargetCheck: AuctionEligibilityCheck = {
   name: 'page-target',
@@ -64,7 +100,12 @@ export const pageTargetCheck: AuctionEligibilityCheck = {
     (ctx.page !== undefined && c.targetPages.includes(ctx.page)),
 };
 
-const DEFAULT_CHECKS: AuctionEligibilityCheck[] = [solvencyCheck, budgetCheck, pageTargetCheck];
+const DEFAULT_CHECKS: AuctionEligibilityCheck[] = [
+  solvencyCheck,
+  budgetCheck,
+  dailyBudgetCheck,
+  pageTargetCheck,
+];
 
 export interface AuctionPosition {
   /** Storefront position id (e.g. "home-top-1"). */
@@ -76,12 +117,20 @@ export interface AuctionPosition {
   format?: string;
   /** Sequential subgroup for mixed exposure; absent positions are simultaneous. */
   sequenceGroup?: string;
+  /** Co-rendered subgroup for mixed exposure; absent positions are simultaneous. */
+  coDisplayGroup?: string;
 }
 
 /** A position accepts a candidate when formats match. A position with no format
  *  (legacy callers) accepts any candidate. */
 function formatMatches(slotFormat: string | undefined, bannerFormat: string | null): boolean {
   return slotFormat === undefined || bannerFormat === slotFormat;
+}
+
+function mixedGroupClaim(position: AuctionPosition): string | null {
+  if (position.sequenceGroup !== undefined) return `sequence:${position.sequenceGroup}`;
+  if (position.coDisplayGroup !== undefined) return `co-display:${position.coDisplayGroup}`;
+  return null;
 }
 
 /**
@@ -102,17 +151,19 @@ export function allocateAuction(
 ): Map<string, CampaignCandidate> {
   const exposure = Array.isArray(exposureOrChecks) ? 'simultaneous' : exposureOrChecks;
   const eligibilityChecks = Array.isArray(exposureOrChecks) ? exposureOrChecks : checks;
+  const checkContext = pinAuctionClock(ctx);
   const eligible = candidates
-    .filter((c) => eligibilityChecks.every((chk) => chk.isEligible(c, ctx)))
+    .filter((c) => eligibilityChecks.every((chk) => chk.isEligible(c, checkContext)))
     .sort((a, b) => (b.cpmKopecks - a.cpmKopecks) || (a.id - b.id));
   const ordered = [...positions].sort((a, b) => (a.weight - b.weight) || (a.slot < b.slot ? -1 : 1));
   const out = new Map<string, CampaignCandidate>();
   const usedCampaigns = new Set<number>();
-  // In mixed exposure the first placement claims its advertiser for either one
-  // sequence group or the ungrouped simultaneous batch. A grouped claim may be
-  // reused only by that same group; an ungrouped claim cannot be reused at all.
+  // In mixed exposure the first placement claims its advertiser for one explicit
+  // group or the ungrouped simultaneous batch. Group modes are namespaced so a
+  // sequence and co-display group with the same external name stay isolated.
   const advertiserClaims = new Map<string, string | null>();
   for (const pos of ordered) {
+    const groupClaim = mixedGroupClaim(pos);
     const winner = eligible.find((c) =>
       !usedCampaigns.has(c.id) &&
       (
@@ -120,8 +171,8 @@ export function allocateAuction(
         !advertiserClaims.has(c.advertiserId) ||
         (
           exposure === 'mixed' &&
-          pos.sequenceGroup !== undefined &&
-          advertiserClaims.get(c.advertiserId) === pos.sequenceGroup
+          groupClaim !== null &&
+          advertiserClaims.get(c.advertiserId) === groupClaim
         )
       ) &&
       formatMatches(pos.format, c.bannerFormat),
@@ -132,7 +183,7 @@ export function allocateAuction(
       if (exposure !== 'sequence' && !advertiserClaims.has(winner.advertiserId)) {
         advertiserClaims.set(
           winner.advertiserId,
-          exposure === 'mixed' ? (pos.sequenceGroup ?? null) : null,
+          exposure === 'mixed' ? groupClaim : null,
         );
       }
     }
@@ -149,7 +200,8 @@ export function runAuction(
   ctx: AuctionCheckContext,
   checks: AuctionEligibilityCheck[] = DEFAULT_CHECKS,
 ): CampaignCandidate | null {
-  const eligible = candidates.filter((c) => checks.every((chk) => chk.isEligible(c, ctx)));
+  const checkContext = pinAuctionClock(ctx);
+  const eligible = candidates.filter((c) => checks.every((chk) => chk.isEligible(c, checkContext)));
   if (eligible.length === 0) return null;
   eligible.sort((a, b) => (b.cpmKopecks - a.cpmKopecks) || (a.id - b.id));
   return eligible[0]!;
@@ -208,8 +260,9 @@ export function allocateFeedFill(
   checks: AuctionEligibilityCheck[] = DEFAULT_CHECKS,
 ): CampaignCandidate[] {
   if (count <= 0) return [];
+  const checkContext = pinAuctionClock(ctx);
   let eligible = candidates.filter(
-    (c) => checks.every((chk) => chk.isEligible(c, ctx)) && formatMatches(opts.format, c.bannerFormat),
+    (c) => checks.every((chk) => chk.isEligible(c, checkContext)) && formatMatches(opts.format, c.bannerFormat),
   );
   if (eligible.length === 0) return [];
 

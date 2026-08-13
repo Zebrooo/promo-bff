@@ -1,7 +1,7 @@
 import type { AuctionExposure, AuctionParams, AuctionPositionParam, FeedFillParams } from './types';
 
 const MAX_SLOT_DIMENSION = 10_000;
-const MAX_SEQUENCE_GROUP_LENGTH = 128;
+const MAX_GROUP_LENGTH = 128;
 
 export type ValidationResult =
   | { ok: true; params: AuctionParams }
@@ -27,7 +27,7 @@ export function validateAuctionParams(body: unknown): ValidationResult {
   }
 
   const slots: AuctionPositionParam[] = [];
-  let hasSequenceGroup = false;
+  let hasMixedGroup = false;
   for (const raw of b.slots) {
     if (typeof raw !== 'object' || raw === null) return { ok: false, error: 'each slot must be an object' };
     const s = raw as Record<string, unknown>;
@@ -38,6 +38,9 @@ export function validateAuctionParams(body: unknown): ValidationResult {
       if (typeof s.format !== 'string') return { ok: false, error: 'slot.format must be a string' };
       pos.format = s.format;
     }
+    if (s.sequenceGroup !== undefined && s.coDisplayGroup !== undefined) {
+      return { ok: false, error: 'slot.sequenceGroup and slot.coDisplayGroup are mutually exclusive' };
+    }
     if (s.sequenceGroup !== undefined) {
       if (exposure !== 'mixed') {
         return { ok: false, error: 'slot.sequenceGroup is only allowed when exposure is mixed' };
@@ -46,14 +49,31 @@ export function validateAuctionParams(body: unknown): ValidationResult {
         return { ok: false, error: 'slot.sequenceGroup must be a string' };
       }
       const sequenceGroup = s.sequenceGroup.trim();
-      if (sequenceGroup === '' || sequenceGroup.length > MAX_SEQUENCE_GROUP_LENGTH) {
+      if (sequenceGroup === '' || sequenceGroup.length > MAX_GROUP_LENGTH) {
         return {
           ok: false,
-          error: `slot.sequenceGroup must be a non-empty string up to ${MAX_SEQUENCE_GROUP_LENGTH} characters`,
+          error: `slot.sequenceGroup must be a non-empty string up to ${MAX_GROUP_LENGTH} characters`,
         };
       }
       pos.sequenceGroup = sequenceGroup;
-      hasSequenceGroup = true;
+      hasMixedGroup = true;
+    }
+    if (s.coDisplayGroup !== undefined) {
+      if (exposure !== 'mixed') {
+        return { ok: false, error: 'slot.coDisplayGroup is only allowed when exposure is mixed' };
+      }
+      if (typeof s.coDisplayGroup !== 'string') {
+        return { ok: false, error: 'slot.coDisplayGroup must be a string' };
+      }
+      const coDisplayGroup = s.coDisplayGroup.trim();
+      if (coDisplayGroup === '' || coDisplayGroup.length > MAX_GROUP_LENGTH) {
+        return {
+          ok: false,
+          error: `slot.coDisplayGroup must be a non-empty string up to ${MAX_GROUP_LENGTH} characters`,
+        };
+      }
+      pos.coDisplayGroup = coDisplayGroup;
+      hasMixedGroup = true;
     }
     const hasWidth = s.width !== undefined;
     const hasHeight = s.height !== undefined;
@@ -79,10 +99,49 @@ export function validateAuctionParams(body: unknown): ValidationResult {
       pos.width = s.width;
       pos.height = s.height;
     }
+    const hasSingletonWidth = s.singletonWidth !== undefined;
+    const hasSingletonHeight = s.singletonHeight !== undefined;
+    if (hasSingletonWidth !== hasSingletonHeight) {
+      return {
+        ok: false,
+        error: 'slot.singletonWidth and slot.singletonHeight must be provided together',
+      };
+    }
+    if (hasSingletonWidth && hasSingletonHeight) {
+      if (exposure !== 'mixed' || pos.coDisplayGroup === undefined) {
+        return {
+          ok: false,
+          error: 'slot singleton size is only allowed for a coDisplayGroup in mixed exposure',
+        };
+      }
+      if (!hasWidth || !hasHeight) {
+        return {
+          ok: false,
+          error: 'slot singleton size requires slot.width and slot.height',
+        };
+      }
+      if (
+        typeof s.singletonWidth !== 'number' ||
+        typeof s.singletonHeight !== 'number' ||
+        !Number.isInteger(s.singletonWidth) ||
+        !Number.isInteger(s.singletonHeight) ||
+        s.singletonWidth <= 0 ||
+        s.singletonHeight <= 0 ||
+        s.singletonWidth > MAX_SLOT_DIMENSION ||
+        s.singletonHeight > MAX_SLOT_DIMENSION
+      ) {
+        return {
+          ok: false,
+          error: `slot.singletonWidth and slot.singletonHeight must be positive integers up to ${MAX_SLOT_DIMENSION}`,
+        };
+      }
+      pos.singletonWidth = s.singletonWidth;
+      pos.singletonHeight = s.singletonHeight;
+    }
     slots.push(pos);
   }
-  if (exposure === 'mixed' && !hasSequenceGroup) {
-    return { ok: false, error: 'mixed exposure requires at least one slot.sequenceGroup' };
+  if (exposure === 'mixed' && !hasMixedGroup) {
+    return { ok: false, error: 'mixed exposure requires at least one slot group' };
   }
   const params: AuctionParams = { slots, exposure };
 
