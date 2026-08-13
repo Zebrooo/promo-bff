@@ -15,6 +15,13 @@ export interface AuctionPositionParam {
   height?: number;
   /** Positions in one group are shown sequentially. Only valid for mixed exposure. */
   sequenceGroup?: string;
+  /** Positions in one group are rendered together but may reuse an advertiser.
+   *  Only valid for mixed exposure and mutually exclusive with sequenceGroup. */
+  coDisplayGroup?: string;
+  /** Alternate rendered size when this is the group's only filled position.
+   *  Requires width+height and coDisplayGroup; supplied as an exact pair. */
+  singletonWidth?: number;
+  singletonHeight?: number;
 }
 
 export interface AuctionParams {

@@ -17,6 +17,12 @@ export interface CampaignCandidate {
   spentKopecks: number;
   /** Total budget cap in kopecks, or null for no cap. */
   totalBudgetKopecks: number | null;
+  /** Daily budget cap in kopecks, or null/undefined for no daily cap. */
+  dailyBudgetKopecks?: number | null;
+  /** Spend recorded for spentTodayDate. Production reads always populate it. */
+  spentTodayKopecks?: number;
+  /** Postgres date (YYYY-MM-DD) for spentTodayKopecks, in Europe/Moscow semantics. */
+  spentTodayDate?: string | null;
   /** Targeted page keys; null/empty = all pages. */
   targetPages: string[] | null;
   /** Size-format family the creative was made for (horizontal|block|vertical). */
@@ -39,6 +45,9 @@ interface CampaignRow {
   creative: unknown;
   spent_kopecks: number | string;
   total_budget_kopecks: number | string | null;
+  daily_budget_kopecks?: number | string | null;
+  spent_today_kopecks?: number | string;
+  spent_today_date?: string | null;
   target_pages: string[] | null;
   banner_format: string | null;
 }
@@ -63,6 +72,9 @@ export function createCampaignService(cfg: SupabaseConfig = config.supabase): Ca
     const spentKopecks = Number(r.spent_kopecks);
     const rawBudget = r.total_budget_kopecks;
     const totalBudgetKopecks = rawBudget === null ? null : Number(rawBudget);
+    const rawDailyBudget = r.daily_budget_kopecks;
+    const dailyBudgetKopecks = rawDailyBudget == null ? null : Number(rawDailyBudget);
+    const spentTodayKopecks = Number(r.spent_today_kopecks ?? 0);
     return {
       id: r.id,
       advertiserId: r.advertiser_id,
@@ -70,13 +82,16 @@ export function createCampaignService(cfg: SupabaseConfig = config.supabase): Ca
       creative: r.creative,
       spentKopecks: Number.isNaN(spentKopecks) ? 0 : spentKopecks,
       totalBudgetKopecks: totalBudgetKopecks !== null && Number.isNaN(totalBudgetKopecks) ? 0 : totalBudgetKopecks,
+      dailyBudgetKopecks: dailyBudgetKopecks !== null && Number.isNaN(dailyBudgetKopecks) ? 0 : dailyBudgetKopecks,
+      spentTodayKopecks: Number.isNaN(spentTodayKopecks) ? 0 : spentTodayKopecks,
+      spentTodayDate: r.spent_today_date ?? null,
       targetPages: r.target_pages,
       bannerFormat: r.banner_format,
     };
   };
 
   async function getCampaignsForSlot(slot: string): Promise<CampaignCandidate[]> {
-    const qs = `status=eq.active&slot=eq.${encodeURIComponent(slot)}&select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,target_pages,banner_format`;
+    const qs = `status=eq.active&slot=eq.${encodeURIComponent(slot)}&select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,daily_budget_kopecks,spent_today_kopecks,spent_today_date,target_pages,banner_format`;
     const res = await fetch(`${table}?${qs}`, { headers: authHeaders(serviceRoleKey) });
     if (!res.ok) throw new Error(`campaign-service read failed: HTTP ${res.status}`);
     const rows = (await res.json()) as CampaignRow[];
@@ -84,7 +99,7 @@ export function createCampaignService(cfg: SupabaseConfig = config.supabase): Ca
   }
 
   async function getActiveBannerCampaigns(): Promise<CampaignCandidate[]> {
-    const qs = `status=eq.active&format=eq.banner&select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,target_pages,banner_format`;
+    const qs = `status=eq.active&format=eq.banner&select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,daily_budget_kopecks,spent_today_kopecks,spent_today_date,target_pages,banner_format`;
     const res = await fetch(`${table}?${qs}`, { headers: authHeaders(serviceRoleKey) });
     if (!res.ok) throw new Error(`campaign-service banner read failed: HTTP ${res.status}`);
     const rows = (await res.json()) as CampaignRow[];

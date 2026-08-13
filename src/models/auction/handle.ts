@@ -60,11 +60,30 @@ export async function handleAuction(params: AuctionParams, deps: AuctionDeps): P
     params.exposure,
   );
 
+  const coDisplayWinnerCounts = new Map<string, number>();
+  for (const position of params.slots) {
+    if (position.coDisplayGroup !== undefined && winners.has(position.slot)) {
+      coDisplayWinnerCounts.set(
+        position.coDisplayGroup,
+        (coDisplayWinnerCounts.get(position.coDisplayGroup) ?? 0) + 1,
+      );
+    }
+  }
+
   const data: AuctionBatchData = {};
   for (const position of params.slots) {
-    const { slot, width, height } = position;
+    const { slot, width, height, singletonWidth, singletonHeight, coDisplayGroup } = position;
     const c = winners.get(slot);
-    const target = width !== undefined && height !== undefined ? { width, height } : undefined;
+    const useSingletonTarget =
+      coDisplayGroup !== undefined &&
+      coDisplayWinnerCounts.get(coDisplayGroup) === 1 &&
+      singletonWidth !== undefined &&
+      singletonHeight !== undefined;
+    const targetWidth = useSingletonTarget ? singletonWidth : width;
+    const targetHeight = useSingletonTarget ? singletonHeight : height;
+    const target = targetWidth !== undefined && targetHeight !== undefined
+      ? { width: targetWidth, height: targetHeight }
+      : undefined;
     data[slot] = c ? campaignToAd(c, target) : null;
   }
   return { status: 'ok', data };

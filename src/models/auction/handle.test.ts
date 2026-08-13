@@ -162,4 +162,147 @@ describe('handleAuction', () => {
       expect(wide.data.inline).not.toHaveProperty('imageVariants');
     }
   });
+
+  it('uses compact targets when two campaigns win the same co-display group', async () => {
+    const deps = makeDeps(
+      [responsiveCand(1, 'a', 9000), responsiveCand(2, 'a', 8000)],
+      new Map([['a', 10]]),
+    );
+    const res = await handleAuction({
+      slots: [
+        {
+          slot: 'left',
+          weight: 1,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+        {
+          slot: 'right',
+          weight: 2,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+      ],
+      exposure: 'mixed',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data.left?.imageUrl).toBe('https://i/compact.png');
+      expect(res.data.right?.imageUrl).toBe('https://i/compact.png');
+      expect(res.data.left).not.toHaveProperty('imageVariants');
+      expect(res.data.right).not.toHaveProperty('imageVariants');
+    }
+  });
+
+  it('uses the singleton target when only one co-display position wins', async () => {
+    const deps = makeDeps([responsiveCand(1, 'a', 9000)], new Map([['a', 10]]));
+    const res = await handleAuction({
+      slots: [
+        {
+          slot: 'left',
+          weight: 1,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+        {
+          slot: 'right',
+          weight: 2,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+      ],
+      exposure: 'mixed',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data.left?.imageUrl).toBe('https://i/wide.png');
+      expect(res.data.right).toBeNull();
+      expect(res.data.left).not.toHaveProperty('imageVariants');
+    }
+  });
+
+  it('uses the singleton target for every one-winner co-display group', async () => {
+    const deps = makeDeps(
+      [responsiveCand(1, 'a', 9000), responsiveCand(2, 'b', 8000)],
+      new Map([['a', 10], ['b', 10]]),
+    );
+    const res = await handleAuction({
+      slots: [
+        {
+          slot: 'left-a', weight: 1, format: 'horizontal', width: 580, height: 120,
+          singletonWidth: 1200, singletonHeight: 150, coDisplayGroup: 'desktop-a',
+        },
+        {
+          slot: 'right-a', weight: 4, format: 'block', width: 580, height: 120,
+          singletonWidth: 1200, singletonHeight: 150, coDisplayGroup: 'desktop-a',
+        },
+        {
+          slot: 'left-b', weight: 2, format: 'horizontal', width: 580, height: 120,
+          singletonWidth: 1200, singletonHeight: 150, coDisplayGroup: 'desktop-b',
+        },
+        {
+          slot: 'right-b', weight: 3, format: 'block', width: 580, height: 120,
+          singletonWidth: 1200, singletonHeight: 150, coDisplayGroup: 'desktop-b',
+        },
+      ],
+      exposure: 'mixed',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data['left-a']?.imageUrl).toBe('https://i/wide.png');
+      expect(res.data['left-b']?.imageUrl).toBe('https://i/wide.png');
+      expect(res.data['right-a']).toBeNull();
+      expect(res.data['right-b']).toBeNull();
+    }
+  });
+
+  it('keeps the normal target for a lone co-display winner without singleton sizes', async () => {
+    const deps = makeDeps([responsiveCand(1, 'a', 9000)], new Map([['a', 10]]));
+    const res = await handleAuction({
+      slots: [
+        {
+          slot: 'left',
+          weight: 1,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          coDisplayGroup: 'desktop-top',
+        },
+        {
+          slot: 'right',
+          weight: 2,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          coDisplayGroup: 'desktop-top',
+        },
+      ],
+      exposure: 'mixed',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data.left?.imageUrl).toBe('https://i/compact.png');
+      expect(res.data.right).toBeNull();
+    }
+  });
 });

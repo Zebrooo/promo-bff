@@ -385,9 +385,91 @@ describe('POST /auction', () => {
     await app.close();
   });
 
+  it('serializes one singleton image URL when only one co-display position wins', async () => {
+    const app = buildServer({ logger: false, deps: {
+      campaignService: {
+        getCampaignsForSlot: async () => [],
+        getActiveBannerCampaigns: async () => [
+          {
+            id: 1,
+            advertiserId: 'a',
+            cpmKopecks: 9000,
+            creative: {
+              format: 'banner',
+              title: 'B',
+              imageUrl: 'https://i/legacy.png',
+              imageVariants: {
+                wide: { imageUrl: 'https://i/wide.png', width: 1200, height: 150 },
+                compact: { imageUrl: 'https://i/compact.png', width: 580, height: 120 },
+              },
+            },
+            spentKopecks: 0,
+            totalBudgetKopecks: null,
+            targetPages: null,
+            bannerFormat: 'horizontal',
+          },
+        ],
+      },
+      balanceService: { getBalances: async () => new Map([['a', 10]]) },
+    } });
+    const res = await postAuction(app, {
+      slots: [
+        {
+          slot: 'home-top-left',
+          weight: 1,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+        {
+          slot: 'home-top-right',
+          weight: 2,
+          format: 'horizontal',
+          width: 580,
+          height: 120,
+          singletonWidth: 1200,
+          singletonHeight: 150,
+          coDisplayGroup: 'desktop-top',
+        },
+      ],
+      exposure: 'mixed',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body['home-top-left']).toMatchObject({
+      id: 'campaign:1',
+      imageUrl: 'https://i/wide.png',
+    });
+    expect(body['home-top-left']).not.toHaveProperty('imageVariants');
+    expect(Object.keys(body['home-top-left']).filter((key) => key.toLowerCase().includes('image'))).toEqual(['imageUrl']);
+    expect(body['home-top-right']).toBeNull();
+    await app.close();
+  });
+
   it('rejects an auction slot with only one dimension', async () => {
     const app = buildServer({ logger: false });
     const res = await postAuction(app, { slots: [{ slot: 'home-top-1', weight: 1, width: 580 }] });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('rejects an auction slot with a partial singleton dimension pair', async () => {
+    const app = buildServer({ logger: false });
+    const res = await postAuction(app, {
+      slots: [{
+        slot: 'home-top-left',
+        weight: 1,
+        width: 580,
+        height: 120,
+        singletonWidth: 1200,
+        coDisplayGroup: 'desktop-top',
+      }],
+      exposure: 'mixed',
+    });
     expect(res.statusCode).toBe(400);
     await app.close();
   });

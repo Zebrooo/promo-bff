@@ -13,15 +13,15 @@ function mockFetch(status: number, body: unknown) {
 describe('createCampaignService.getCampaignsForSlot', () => {
   it('queries status=active + slot and maps rows to candidates', async () => {
     const fn = mockFetch(200, [
-      { id: 7, advertiser_id: 'adv-1', cpm_kopecks: 5000, creative: { format: 'popup', title: 'Hi' }, spent_kopecks: 1200, total_budget_kopecks: 30000, target_pages: null, banner_format: null },
+      { id: 7, advertiser_id: 'adv-1', cpm_kopecks: 5000, creative: { format: 'popup', title: 'Hi' }, spent_kopecks: 1200, total_budget_kopecks: 30000, daily_budget_kopecks: null, spent_today_kopecks: 0, spent_today_date: null, target_pages: null, banner_format: null },
     ]);
     const out = await createCampaignService(cfg).getCampaignsForSlot('home-popup');
-    expect(out).toEqual([{ id: 7, advertiserId: 'adv-1', cpmKopecks: 5000, creative: { format: 'popup', title: 'Hi' }, spentKopecks: 1200, totalBudgetKopecks: 30000, targetPages: null, bannerFormat: null }]);
+    expect(out).toEqual([{ id: 7, advertiserId: 'adv-1', cpmKopecks: 5000, creative: { format: 'popup', title: 'Hi' }, spentKopecks: 1200, totalBudgetKopecks: 30000, dailyBudgetKopecks: null, spentTodayKopecks: 0, spentTodayDate: null, targetPages: null, bannerFormat: null }]);
     const url = (fn.mock.calls[0] as unknown as [string])[0];
     expect(url).toContain('/rest/v1/ad_campaigns');
     expect(url).toContain('status=eq.active');
     expect(url).toContain('slot=eq.home-popup');
-    expect(url).toContain('select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,target_pages,banner_format');
+    expect(url).toContain('select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,daily_budget_kopecks,spent_today_kopecks,spent_today_date,target_pages,banner_format');
   });
 
   it('maps a null total budget to null', async () => {
@@ -54,20 +54,50 @@ describe('createCampaignService.getCampaignsForSlot', () => {
 describe('createCampaignService.getActiveBannerCampaigns', () => {
   it('getActiveBannerCampaigns queries status=active + format=banner', async () => {
     const fn = mockFetch(200, [
-      { id: 7, advertiser_id: 'adv-1', cpm_kopecks: 5000, creative: { format: 'banner', title: 'B' }, spent_kopecks: 0, total_budget_kopecks: 30000, target_pages: ['home'], banner_format: 'horizontal' },
+      { id: 7, advertiser_id: 'adv-1', cpm_kopecks: 5000, creative: { format: 'banner', title: 'B' }, spent_kopecks: 0, total_budget_kopecks: 30000, daily_budget_kopecks: null, spent_today_kopecks: 0, spent_today_date: null, target_pages: ['home'], banner_format: 'horizontal' },
     ]);
     const out = await createCampaignService(cfg).getActiveBannerCampaigns();
-    expect(out).toEqual([{ id: 7, advertiserId: 'adv-1', cpmKopecks: 5000, creative: { format: 'banner', title: 'B' }, spentKopecks: 0, totalBudgetKopecks: 30000, targetPages: ['home'], bannerFormat: 'horizontal' }]);
+    expect(out).toEqual([{ id: 7, advertiserId: 'adv-1', cpmKopecks: 5000, creative: { format: 'banner', title: 'B' }, spentKopecks: 0, totalBudgetKopecks: 30000, dailyBudgetKopecks: null, spentTodayKopecks: 0, spentTodayDate: null, targetPages: ['home'], bannerFormat: 'horizontal' }]);
     const url = (fn.mock.calls[0] as unknown as [string])[0];
     expect(url).toContain('/rest/v1/ad_campaigns');
     expect(url).toContain('status=eq.active');
     expect(url).toContain('format=eq.banner');
-    expect(url).toContain('select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,target_pages,banner_format');
+    expect(url).toContain('select=id,advertiser_id,cpm_kopecks,creative,spent_kopecks,total_budget_kopecks,daily_budget_kopecks,spent_today_kopecks,spent_today_date,target_pages,banner_format');
   });
 
   it('getActiveBannerCampaigns is a no-op ([]) when unconfigured', async () => {
     const out = await createCampaignService({ url: '', serviceRoleKey: '', timeoutMs: 2000 }).getActiveBannerCampaigns();
     expect(out).toEqual([]);
+  });
+
+  it('selects and maps the daily-budget counter used by auction eligibility', async () => {
+    const fn = mockFetch(200, [
+      {
+        id: 9,
+        advertiser_id: 'adv-daily',
+        cpm_kopecks: '5000',
+        creative: { format: 'banner', title: 'B' },
+        spent_kopecks: '1200',
+        total_budget_kopecks: null,
+        daily_budget_kopecks: '30000',
+        spent_today_kopecks: '30000',
+        spent_today_date: '2026-08-13',
+        target_pages: ['home'],
+        banner_format: 'horizontal',
+      },
+    ]);
+
+    const [campaign] = await createCampaignService(cfg).getActiveBannerCampaigns();
+
+    expect(campaign).toMatchObject({
+      dailyBudgetKopecks: 30_000,
+      spentTodayKopecks: 30_000,
+      spentTodayDate: '2026-08-13',
+    });
+    const url = (fn.mock.calls[0] as unknown as [string])[0];
+    expect(url).toContain('daily_budget_kopecks');
+    expect(url).toContain('spent_today_kopecks');
+    expect(url).toContain('spent_today_date');
   });
 });
 

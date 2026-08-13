@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runAuction, solvencyCheck, budgetCheck, pageTargetCheck, allocateAuction, allocateFeedFill } from './run-auction';
+import { runAuction, solvencyCheck, budgetCheck, dailyBudgetCheck, pageTargetCheck, allocateAuction, allocateFeedFill } from './run-auction';
 import type { CampaignCandidate } from '../services/campaign-service';
 
 function cand(id: number, advertiserId: string, cpmKopecks: number): CampaignCandidate {
@@ -76,7 +76,12 @@ describe('runAuction', () => {
 });
 
 describe('allocateAuction', () => {
-  const pos = (slot: string, weight: number, sequenceGroup?: string) => ({ slot, weight, sequenceGroup });
+  const pos = (slot: string, weight: number, sequenceGroup?: string, coDisplayGroup?: string) => ({
+    slot,
+    weight,
+    sequenceGroup,
+    coDisplayGroup,
+  });
 
   it('assigns highest cpm to the lowest-weight position, one campaign per position', () => {
     const balances = new Map([['a', 10], ['b', 10], ['c', 10]]);
@@ -276,6 +281,49 @@ describe('allocateAuction', () => {
     expect(out.get('slide-1')?.id).toBe(1);
     expect(out.has('slide-2')).toBe(false);
   });
+
+  it('mixed lets an advertiser fill its co-display group but still blocks it from ungrouped slots', () => {
+    const balances = new Map([['adv-A', 100_000], ['adv-B', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 8000, 0, null),
+        budgeted(3, 'adv-A', 7000, 0, null),
+        budgeted(4, 'adv-B', 6000, 0, null),
+      ],
+      [
+        pos('left', 1, undefined, 'desktop-top'),
+        pos('right', 2, undefined, 'desktop-top'),
+        pos('static', 3),
+      ],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('left')?.id).toBe(1);
+    expect(out.get('right')?.id).toBe(2);
+    expect(out.get('static')?.id).toBe(4);
+  });
+
+  it('namespaces sequence and co-display group claims with the same external name', () => {
+    const balances = new Map([['adv-A', 100_000], ['adv-B', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 8000, 0, null),
+        budgeted(3, 'adv-B', 7000, 0, null),
+      ],
+      [
+        pos('slide', 1, 'hero'),
+        pos('companion', 2, undefined, 'hero'),
+      ],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('slide')?.id).toBe(1);
+    expect(out.get('companion')?.id).toBe(3);
+  });
 });
 
 describe('budgetCheck', () => {
@@ -335,6 +383,86 @@ describe('budgetCheck', () => {
       { balances },
     );
     expect(winner?.id).toBe(2);
+  });
+});
+
+describe('dailyBudgetCheck', () => {
+  const at = (iso: string) => ({ balances: new Map<string, number>(), now: new Date(iso) });
+  const daily = (
+    spentTodayKopecks: number,
+    spentTodayDate: string | null,
+    dailyBudgetKopecks: number | null = 1_000,
+  ): CampaignCandidate => ({
+    ...budgeted(1, 'a', 9_000, 0, null),
+    dailyBudgetKopecks,
+    spentTodayKopecks,
+    spentTodayDate,
+  });
+
+  it('excludes a campaign whose Moscow-day budget is exhausted', () => {
+    expect(dailyBudgetCheck.isEligible(
+      daily(1_000, '2026-08-13'),
+      at('2026-08-13T09:00:00.000Z'),
+    )).toBe(false);
+  });
+
+  it('keeps the campaign eligible until the database daily limit is actually reached', () => {
+    expect(dailyBudgetCheck.isEligible(
+      daily(999, '2026-08-13'),
+      at('2026-08-13T09:00:00.000Z'),
+    )).toBe(true);
+  });
+
+  it('treats a stale counter as reset at midnight in Europe/Moscow', () => {
+    const exhaustedYesterday = daily(1_000, '2026-08-12');
+
+    expect(dailyBudgetCheck.isEligible(
+      exhaustedYesterday,
+      at('2026-08-12T20:59:59.999Z'),
+    )).toBe(false);
+    expect(dailyBudgetCheck.isEligible(
+      exhaustedYesterday,
+      at('2026-08-12T21:00:00.000Z'),
+    )).toBe(true);
+  });
+
+  it('treats a null daily budget as unlimited', () => {
+    expect(dailyBudgetCheck.isEligible(
+      daily(999_999, '2026-08-13', null),
+      at('2026-08-13T09:00:00.000Z'),
+    )).toBe(true);
+  });
+});
+
+describe('allocateAuction — daily budget before co-display allocation', () => {
+  it('does not count an exhausted campaign as a second co-display winner', () => {
+    const exhausted = {
+      ...budgeted(1, 'adv-A', 9_000, 0, null),
+      dailyBudgetKopecks: 1_000,
+      spentTodayKopecks: 1_000,
+      spentTodayDate: '2026-08-13',
+    };
+    const eligible = {
+      ...budgeted(2, 'adv-A', 8_000, 0, null),
+      dailyBudgetKopecks: 1_000,
+      spentTodayKopecks: 999,
+      spentTodayDate: '2026-08-13',
+    };
+    const winners = allocateAuction(
+      [exhausted, eligible],
+      [
+        { slot: 'left', weight: 1, coDisplayGroup: 'desktop-top' },
+        { slot: 'right', weight: 2, coDisplayGroup: 'desktop-top' },
+      ],
+      {
+        balances: new Map([['adv-A', 100_000]]),
+        now: new Date('2026-08-13T09:00:00.000Z'),
+      },
+      'mixed',
+    );
+
+    expect(winners.get('left')?.id).toBe(2);
+    expect(winners.has('right')).toBe(false);
   });
 });
 
