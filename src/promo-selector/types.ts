@@ -22,6 +22,28 @@ export interface PromoTargeting {
     /** Rolling history window. Defaults to 30 days. */
     lookbackDays?: number;
   };
+  /** Purchase-history gate (VIP/premium/bump packs). Omitted/empty means no gate. */
+  purchases?: {
+    /** true = must have purchased; false = must NOT have purchased in the window. */
+    purchased?: boolean;
+    minTotalKopecks?: number;
+    maxTotalKopecks?: number;
+    minCount?: number;
+    maxCount?: number;
+    /** Restrict to these pack kinds; omitted/empty = any kind. */
+    packTypes?: ('bump' | 'premium' | 'vip')[];
+    /** Rolling window. Defaults to 30 days. */
+    lookbackDays?: number;
+  };
+  /** Wallet balance/movement gate. Omitted/empty means no gate. */
+  balance?: {
+    currentAbove?: number;
+    currentBelow?: number;
+    movementAbove?: number;
+    movementBelow?: number;
+    /** Window for movement checks. Omitted = all-time (since account creation). */
+    movementLookbackDays?: number;
+  };
 }
 
 /**
