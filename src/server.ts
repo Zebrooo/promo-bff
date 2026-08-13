@@ -158,7 +158,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     listingService: createListingService(),
     searchHistoryService: createSearchHistoryService(),
     purchaseLedgerService: createPurchaseLedgerService(),
-    balanceService: createBalanceService(),
+    balanceService: createBalanceService(config.aaSupabase),
     checkerStats,
     selectionTrace,
     logger: app.log,

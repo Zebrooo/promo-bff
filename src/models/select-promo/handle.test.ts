@@ -634,6 +634,11 @@ describe('handleSelectPromo', () => {
 describe('loadWalletDataForSelection', () => {
   const purchaseTargeted = makePromo({ id: 'purchase-targeted', targeting: { purchases: { purchased: true } } });
   const balanceTargeted = makePromo({ id: 'balance-targeted', targeting: { balance: { currentAbove: 0, movementAbove: 0 } } });
+  // Wallet lookups only run for an authorized identity (anonymous viewers are
+  // gated out before any I/O — see the dedicated anonymous test below), so
+  // every test in this block that expects the wallet services to actually be
+  // called must identify as authorized.
+  const authUser = { isAuthorized: true, identityKind: 'account' as const };
 
   it('loads purchases/balance/movement exactly once per selection walk (not once per checker/candidate)', async () => {
     let purchaseCalls = 0;
@@ -658,7 +663,7 @@ describe('loadWalletDataForSelection', () => {
       },
     });
     const result = await loadWalletDataForSelection(
-      { userId: 'u1' },
+      { userId: 'u1', user: authUser },
       [purchaseTargeted, balanceTargeted],
       [],
       walletDeps,
@@ -681,7 +686,7 @@ describe('loadWalletDataForSelection', () => {
       balanceService: { getBalances: async () => new Map([['u1', 20000]]) },
       logger,
     });
-    const result = await loadWalletDataForSelection({ userId: 'u1' }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
     expect(result.purchases).toBeUndefined();
     expect(result.walletBalanceKopecks).toBe(20000);
     expect(result.walletMovementByWindow.get(undefined)).toBe(7000);
@@ -696,7 +701,7 @@ describe('loadWalletDataForSelection', () => {
       balanceService: { getBalances: async () => { throw new Error('balance unavailable'); } },
       logger,
     });
-    const result = await loadWalletDataForSelection({ userId: 'u1' }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
     expect(result.walletBalanceKopecks).toBeUndefined();
     expect(result.purchases).toHaveLength(1);
     expect(result.walletMovementByWindow.get(undefined)).toBe(3000);
@@ -708,14 +713,14 @@ describe('loadWalletDataForSelection', () => {
       purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
       balanceService: { getBalances: async () => { throw new Error('balance unavailable'); } },
     });
-    const failedResult = await loadWalletDataForSelection({ userId: 'u1' }, [balanceTargeted], [], failed, 'select-promo');
+    const failedResult = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [balanceTargeted], [], failed, 'select-promo');
     expect(failedResult.walletBalanceUnavailable).toBe(true);
 
     const succeeded = deps({
       purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
       balanceService: { getBalances: async () => new Map() }, // succeeds, just no row for this user
     });
-    const succeededResult = await loadWalletDataForSelection({ userId: 'u1' }, [balanceTargeted], [], succeeded, 'select-promo');
+    const succeededResult = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [balanceTargeted], [], succeeded, 'select-promo');
     expect(succeededResult.walletBalanceUnavailable).toBeUndefined();
   });
 
@@ -727,7 +732,7 @@ describe('loadWalletDataForSelection', () => {
       balanceService: { getBalances: async () => new Map([['u1', 40000]]) },
       logger,
     });
-    const result = await loadWalletDataForSelection({ userId: 'u1' }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
     expect(result.walletMovementByWindow.has(undefined)).toBe(false);
     expect(result.walletBalanceKopecks).toBe(40000);
     expect(errors).toContainEqual({
@@ -745,6 +750,25 @@ describe('loadWalletDataForSelection', () => {
     const result = await loadWalletDataForSelection({ userId: 'u1' }, [makePromo({ id: 'generic' })], [], walletDeps, 'select-promo');
     expect(called).toBe(false);
     expect(result.purchases).toEqual([]);
+    expect(result.walletMovementByWindow.size).toBe(0);
+  });
+
+  it('does not call any wallet service for an anonymous identity, even when the queue has a purchases/balance rule (PurchaseChecker/BalanceChecker hard-fail anonymous viewers anyway)', async () => {
+    let called = false;
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => { called = true; return []; }, getMovement: async () => { called = true; return 0; } },
+      balanceService: { getBalances: async () => { called = true; return new Map(); } },
+    });
+    const result = await loadWalletDataForSelection(
+      { userId: 'anon-1', user: { isAuthorized: false, identityKind: 'anonymous' } },
+      [purchaseTargeted, balanceTargeted],
+      [],
+      walletDeps,
+      'select-promo',
+    );
+    expect(called).toBe(false);
+    expect(result.purchases).toEqual([]);
+    expect(result.walletBalanceKopecks).toBeUndefined();
     expect(result.walletMovementByWindow.size).toBe(0);
   });
 
@@ -782,7 +806,7 @@ describe('loadWalletDataForSelection', () => {
     });
     const promo7 = makePromo({ id: 'weekly', targeting: { balance: { movementAbove: 0, movementLookbackDays: 7 } } });
     const promo30 = makePromo({ id: 'monthly', targeting: { balance: { movementAbove: 0, movementLookbackDays: 30 } } });
-    const result = await loadWalletDataForSelection({ userId: 'u1' }, [promo7, promo30], [], walletDeps, 'select-promo');
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [promo7, promo30], [], walletDeps, 'select-promo');
 
     expect(calls).toHaveLength(2);
     const sinceMsValues = calls.map((c) => c.sinceMs);

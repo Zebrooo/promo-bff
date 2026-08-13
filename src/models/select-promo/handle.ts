@@ -97,7 +97,7 @@ export async function loadWalletDataForSelection(
     walletBalanceUnavailable: undefined,
     walletMovementByWindow: new Map<number | undefined, number>(),
   };
-  if (!params.userId) return empty;
+  if (!params.userId || !resolveUserIdentity(params.user).isAuthorized) return empty;
 
   const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
   const needsBalance = !skip.includes('balance') && promos.some(hasBalanceRule);
