@@ -1,6 +1,7 @@
-import type { AuctionParams, AuctionPositionParam, FeedFillParams } from './types';
+import type { AuctionExposure, AuctionParams, AuctionPositionParam, FeedFillParams } from './types';
 
 const MAX_SLOT_DIMENSION = 10_000;
+const MAX_SEQUENCE_GROUP_LENGTH = 128;
 
 export type ValidationResult =
   | { ok: true; params: AuctionParams }
@@ -16,7 +17,17 @@ export function validateAuctionParams(body: unknown): ValidationResult {
   if (!Array.isArray(b.slots) || b.slots.length === 0) {
     return { ok: false, error: 'slots is required and must be a non-empty array' };
   }
+
+  let exposure: AuctionExposure = 'simultaneous';
+  if (b.exposure !== undefined) {
+    if (b.exposure !== 'simultaneous' && b.exposure !== 'sequence' && b.exposure !== 'mixed') {
+      return { ok: false, error: 'exposure must be simultaneous, sequence, or mixed' };
+    }
+    exposure = b.exposure;
+  }
+
   const slots: AuctionPositionParam[] = [];
+  let hasSequenceGroup = false;
   for (const raw of b.slots) {
     if (typeof raw !== 'object' || raw === null) return { ok: false, error: 'each slot must be an object' };
     const s = raw as Record<string, unknown>;
@@ -26,6 +37,23 @@ export function validateAuctionParams(body: unknown): ValidationResult {
     if (s.format !== undefined) {
       if (typeof s.format !== 'string') return { ok: false, error: 'slot.format must be a string' };
       pos.format = s.format;
+    }
+    if (s.sequenceGroup !== undefined) {
+      if (exposure !== 'mixed') {
+        return { ok: false, error: 'slot.sequenceGroup is only allowed when exposure is mixed' };
+      }
+      if (typeof s.sequenceGroup !== 'string') {
+        return { ok: false, error: 'slot.sequenceGroup must be a string' };
+      }
+      const sequenceGroup = s.sequenceGroup.trim();
+      if (sequenceGroup === '' || sequenceGroup.length > MAX_SEQUENCE_GROUP_LENGTH) {
+        return {
+          ok: false,
+          error: `slot.sequenceGroup must be a non-empty string up to ${MAX_SEQUENCE_GROUP_LENGTH} characters`,
+        };
+      }
+      pos.sequenceGroup = sequenceGroup;
+      hasSequenceGroup = true;
     }
     const hasWidth = s.width !== undefined;
     const hasHeight = s.height !== undefined;
@@ -53,14 +81,10 @@ export function validateAuctionParams(body: unknown): ValidationResult {
     }
     slots.push(pos);
   }
-  const params: AuctionParams = { slots, exposure: 'simultaneous' };
-
-  if (b.exposure !== undefined) {
-    if (b.exposure !== 'simultaneous' && b.exposure !== 'sequence') {
-      return { ok: false, error: 'exposure must be simultaneous or sequence' };
-    }
-    params.exposure = b.exposure;
+  if (exposure === 'mixed' && !hasSequenceGroup) {
+    return { ok: false, error: 'mixed exposure requires at least one slot.sequenceGroup' };
   }
+  const params: AuctionParams = { slots, exposure };
 
   if (b.page !== undefined) {
     if (typeof b.page !== 'string') return { ok: false, error: 'page must be a string' };

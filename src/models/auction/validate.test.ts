@@ -17,6 +17,48 @@ describe('validateAuctionParams', () => {
 
     expect(validateAuctionParams({ slots: [{ slot: 'x', weight: 1 }], exposure: 'carousel' }).ok).toBe(false);
   });
+  it('accepts mixed exposure with a normalized sequence group', () => {
+    const r = validateAuctionParams({
+      slots: [
+        { slot: 'hero-static', weight: 1 },
+        { slot: 'hero-slide-1', weight: 2, sequenceGroup: '  home-hero  ' },
+        { slot: 'hero-slide-2', weight: 3, sequenceGroup: 'home-hero' },
+      ],
+      exposure: 'mixed',
+    });
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params.exposure).toBe('mixed');
+      expect(r.params.slots[0]).not.toHaveProperty('sequenceGroup');
+      expect(r.params.slots[1]?.sequenceGroup).toBe('home-hero');
+      expect(r.params.slots[2]?.sequenceGroup).toBe('home-hero');
+    }
+  });
+  it('rejects sequenceGroup unless exposure is mixed', () => {
+    const slot = { slot: 'x', weight: 1, sequenceGroup: 'hero' };
+
+    expect(validateAuctionParams({ slots: [slot] }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [slot], exposure: 'simultaneous' }).ok).toBe(false);
+    expect(validateAuctionParams({ slots: [slot], exposure: 'sequence' }).ok).toBe(false);
+  });
+  it('rejects mixed exposure without a sequence group', () => {
+    expect(validateAuctionParams({
+      slots: [{ slot: 'x', weight: 1 }],
+      exposure: 'mixed',
+    }).ok).toBe(false);
+  });
+  it('rejects invalid or overlong sequence groups after trimming', () => {
+    const validateGroup = (sequenceGroup: unknown) => validateAuctionParams({
+      slots: [{ slot: 'x', weight: 1, sequenceGroup }],
+      exposure: 'mixed',
+    });
+
+    expect(validateGroup(5).ok).toBe(false);
+    expect(validateGroup('   ').ok).toBe(false);
+    expect(validateGroup(` ${'g'.repeat(128)} `).ok).toBe(true);
+    expect(validateGroup(` ${'g'.repeat(129)} `).ok).toBe(false);
+  });
   it('rejects an empty or missing slots array', () => {
     expect(validateAuctionParams({}).ok).toBe(false);
     expect(validateAuctionParams({ slots: [] }).ok).toBe(false);

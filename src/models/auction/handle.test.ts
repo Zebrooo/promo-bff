@@ -108,6 +108,28 @@ describe('handleAuction', () => {
     }
   });
 
+  it('passes mixed sequence-group metadata to allocation', async () => {
+    const deps = makeDeps(
+      [cand(1, 'a', 9000), cand(2, 'a', 8000), cand(3, 'b', 7000)],
+      new Map([['a', 10], ['b', 10]]),
+    );
+    const res = await handleAuction({
+      slots: [
+        { slot: 'slide-1', weight: 1, sequenceGroup: 'hero' },
+        { slot: 'static', weight: 2 },
+        { slot: 'slide-2', weight: 3, sequenceGroup: 'hero' },
+      ],
+      exposure: 'mixed',
+    }, deps);
+
+    expect(res.status).toBe('ok');
+    if (res.status === 'ok') {
+      expect(res.data['slide-1']?.id).toBe('campaign:1');
+      expect(res.data.static?.id).toBe('campaign:3');
+      expect(res.data['slide-2']?.id).toBe('campaign:2');
+    }
+  });
+
   it('error envelope when the campaign service fails', async () => {
     const deps = makeDepsThrowingCampaigns();
     const res = await handleAuction({ slots: [{ slot: 'top', weight: 1 }] }, deps);
