@@ -67,6 +67,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Setup gh (наши раннеры без него — арендованные машины GitHub его уже имеют)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh уже есть: $(gh --version | head -1)"
+            exit 0
+          fi
+          ver=2.96.0
+          sha=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o gh.tgz \
+            "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.tar.gz"
+          echo "${sha}  gh.tgz" | sha256sum -c -
+          tar xzf gh.tgz
+          echo "$RUNNER_TEMP/gh_${ver}_linux_amd64/bin" >> "$GITHUB_PATH"
+          echo "поставлен gh ${ver}"
       - name: Create tag + GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
