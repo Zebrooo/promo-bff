@@ -74,6 +74,8 @@ export interface AuctionPosition {
   /** Size-format family this position accepts; only candidates whose bannerFormat
    *  matches may fill it. Omitted = legacy any-format. */
   format?: string;
+  /** Sequential subgroup for mixed exposure; absent positions are simultaneous. */
+  sequenceGroup?: string;
 }
 
 /** A position accepts a candidate when formats match. A position with no format
@@ -106,19 +108,33 @@ export function allocateAuction(
   const ordered = [...positions].sort((a, b) => (a.weight - b.weight) || (a.slot < b.slot ? -1 : 1));
   const out = new Map<string, CampaignCandidate>();
   const usedCampaigns = new Set<number>();
-  // Simultaneous placements must not show one advertiser more than once. In a
-  // sequence, distinct campaigns from that advertiser are safe to show in turn.
-  const usedAdvertisers = new Set<string>();
+  // In mixed exposure the first placement claims its advertiser for either one
+  // sequence group or the ungrouped simultaneous batch. A grouped claim may be
+  // reused only by that same group; an ungrouped claim cannot be reused at all.
+  const advertiserClaims = new Map<string, string | null>();
   for (const pos of ordered) {
     const winner = eligible.find((c) =>
       !usedCampaigns.has(c.id) &&
-      (exposure === 'sequence' || !usedAdvertisers.has(c.advertiserId)) &&
+      (
+        exposure === 'sequence' ||
+        !advertiserClaims.has(c.advertiserId) ||
+        (
+          exposure === 'mixed' &&
+          pos.sequenceGroup !== undefined &&
+          advertiserClaims.get(c.advertiserId) === pos.sequenceGroup
+        )
+      ) &&
       formatMatches(pos.format, c.bannerFormat),
     );
     if (winner) {
       out.set(pos.slot, winner);
       usedCampaigns.add(winner.id);
-      usedAdvertisers.add(winner.advertiserId);
+      if (exposure !== 'sequence' && !advertiserClaims.has(winner.advertiserId)) {
+        advertiserClaims.set(
+          winner.advertiserId,
+          exposure === 'mixed' ? (pos.sequenceGroup ?? null) : null,
+        );
+      }
     }
   }
   return out;

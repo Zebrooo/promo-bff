@@ -1,7 +1,7 @@
 /** Public request/response types for the B2C batch auction endpoint (SP3 + SP5). */
 import type { ModelResult, Advertisement } from '../select-promo/types';
 
-export type AuctionExposure = 'simultaneous' | 'sequence';
+export type AuctionExposure = 'simultaneous' | 'sequence' | 'mixed';
 
 export interface AuctionPositionParam {
   slot: string;
@@ -13,12 +13,14 @@ export interface AuctionPositionParam {
    *  winning horizontal creative uses it to select one server-side image variant. */
   width?: number;
   height?: number;
+  /** Positions in one group are shown sequentially. Only valid for mixed exposure. */
+  sequenceGroup?: string;
 }
 
 export interface AuctionParams {
   /** The page's positions to fill, each with a rank weight (lower = best place). */
   slots: AuctionPositionParam[];
-  /** Whether positions are visible together or shown one after another. */
+  /** Whether positions are visible together, sequential, or a mixture of both. */
   exposure?: AuctionExposure;
   /** Page key for targeting (e.g. "home", "catalog-transport"). */
   page?: string;

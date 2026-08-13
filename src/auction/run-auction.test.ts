@@ -76,7 +76,7 @@ describe('runAuction', () => {
 });
 
 describe('allocateAuction', () => {
-  const pos = (slot: string, weight: number) => ({ slot, weight });
+  const pos = (slot: string, weight: number, sequenceGroup?: string) => ({ slot, weight, sequenceGroup });
 
   it('assigns highest cpm to the lowest-weight position, one campaign per position', () => {
     const balances = new Map([['a', 10], ['b', 10], ['c', 10]]);
@@ -204,6 +204,77 @@ describe('allocateAuction', () => {
 
     expect(out.get('first')?.id).toBe(1);
     expect(out.has('second')).toBe(false);
+  });
+
+  it('mixed lets an advertiser use distinct campaigns only inside its claimed group', () => {
+    const balances = new Map([['adv-A', 100_000], ['adv-B', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 8000, 0, null),
+        budgeted(3, 'adv-B', 7000, 0, null),
+      ],
+      [
+        pos('slide-1', 1, 'hero'),
+        pos('static', 2),
+        pos('slide-2', 3, 'hero'),
+      ],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('slide-1')?.id).toBe(1);
+    expect(out.get('static')?.id).toBe(3);
+    expect(out.get('slide-2')?.id).toBe(2);
+  });
+
+  it('mixed does not let an advertiser claimed by one group appear in another group', () => {
+    const balances = new Map([['adv-A', 100_000], ['adv-B', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 8000, 0, null),
+        budgeted(3, 'adv-B', 7000, 0, null),
+      ],
+      [pos('hero', 1, 'hero'), pos('stories', 2, 'stories')],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('hero')?.id).toBe(1);
+    expect(out.get('stories')?.id).toBe(3);
+  });
+
+  it('mixed treats ungrouped slots as simultaneous and blocks their advertisers elsewhere', () => {
+    const balances = new Map([['adv-A', 100_000], ['adv-B', 100_000], ['adv-C', 100_000]]);
+    const out = allocateAuction(
+      [
+        budgeted(1, 'adv-A', 9000, 0, null),
+        budgeted(2, 'adv-A', 8000, 0, null),
+        budgeted(3, 'adv-B', 7000, 0, null),
+        budgeted(4, 'adv-C', 6000, 0, null),
+      ],
+      [pos('static-1', 1), pos('static-2', 2), pos('slide', 3, 'hero')],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('static-1')?.id).toBe(1);
+    expect(out.get('static-2')?.id).toBe(3);
+    expect(out.get('slide')?.id).toBe(4);
+  });
+
+  it('mixed never repeats the same campaign inside a sequence group', () => {
+    const balances = new Map([['adv-A', 100_000]]);
+    const out = allocateAuction(
+      [budgeted(1, 'adv-A', 9000, 0, null)],
+      [pos('slide-1', 1, 'hero'), pos('slide-2', 2, 'hero')],
+      { balances },
+      'mixed',
+    );
+
+    expect(out.get('slide-1')?.id).toBe(1);
+    expect(out.has('slide-2')).toBe(false);
   });
 });
 
