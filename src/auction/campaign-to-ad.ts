@@ -9,7 +9,7 @@
  */
 import type { CampaignCandidate } from '../services/campaign-service';
 import type { Advertisement } from '../models/select-promo/types';
-import type { PromoFormat } from '../promo-selector/types';
+import type { ImageFocalPoint, PromoFormat } from '../promo-selector/types';
 
 const FORMATS: readonly PromoFormat[] = ['inline', 'popup', 'fullscreen', 'topline', 'banner', 'tooltip'];
 const MAX_IMAGE_DIMENSION = 10_000;
@@ -23,10 +23,34 @@ interface ImageVariant {
   imageUrl: string;
   width: number;
   height: number;
+  focalPoint?: ImageFocalPoint;
+}
+
+interface ImageProjection {
+  imageUrl?: string;
+  imageFocalPoint?: ImageFocalPoint;
 }
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() !== '' ? v : undefined;
+}
+
+function imageFocalPoint(value: unknown): ImageFocalPoint | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const { xBp, yBp } = value as Record<string, unknown>;
+  if (
+    typeof xBp !== 'number' ||
+    typeof yBp !== 'number' ||
+    !Number.isInteger(xBp) ||
+    !Number.isInteger(yBp) ||
+    xBp < 0 ||
+    xBp > 10_000 ||
+    yBp < 0 ||
+    yBp > 10_000
+  ) {
+    return undefined;
+  }
+  return { xBp, yBp };
 }
 
 function imageVariant(value: unknown): ImageVariant | null {
@@ -47,11 +71,25 @@ function imageVariant(value: unknown): ImageVariant | null {
   ) {
     return null;
   }
-  return { imageUrl, width, height };
+  const focalPoint = imageFocalPoint(variant.focalPoint);
+  return { imageUrl, width, height, ...(focalPoint !== undefined ? { focalPoint } : {}) };
 }
 
-function imageUrlForTarget(r: Record<string, unknown>, target: AdTargetSize | undefined): string | undefined {
-  const fallback = str(r.imageUrl);
+function primaryImageProjection(r: Record<string, unknown>): ImageProjection {
+  const imageUrl = str(r.imageUrl);
+  if (imageUrl === undefined) return {};
+  const focalPoint = imageFocalPoint(r.imageFocalPoint);
+  return {
+    imageUrl,
+    ...(focalPoint !== undefined ? { imageFocalPoint: focalPoint } : {}),
+  };
+}
+
+function imageProjectionForTarget(
+  r: Record<string, unknown>,
+  target: AdTargetSize | undefined,
+): ImageProjection {
+  const fallback = primaryImageProjection(r);
   if (
     target === undefined ||
     !Number.isFinite(target.width) ||
@@ -71,11 +109,15 @@ function imageUrlForTarget(r: Record<string, unknown>, target: AdTargetSize | un
   if (wide === null || compact === null) return fallback;
 
   const targetAspect = target.width / target.height;
-  return [wide, compact].reduce((best, candidate) => {
+  const selected = [wide, compact].reduce((best, candidate) => {
     const bestDistance = Math.abs(Math.log(targetAspect / (best.width / best.height)));
     const candidateDistance = Math.abs(Math.log(targetAspect / (candidate.width / candidate.height)));
     return candidateDistance < bestDistance ? candidate : best;
-  }).imageUrl;
+  });
+  return {
+    imageUrl: selected.imageUrl,
+    ...(selected.focalPoint !== undefined ? { imageFocalPoint: selected.focalPoint } : {}),
+  };
 }
 
 export function campaignToAd(c: CampaignCandidate, target?: AdTargetSize): Advertisement | null {
@@ -98,10 +140,11 @@ export function campaignToAd(c: CampaignCandidate, target?: AdTargetSize): Adver
 
   const description = str(r.description);
   if (description !== undefined) ad.description = description;
-  const imageUrl = format === 'banner' && c.bannerFormat === 'horizontal'
-    ? imageUrlForTarget(r, target)
-    : str(r.imageUrl);
-  if (imageUrl !== undefined) ad.imageUrl = imageUrl;
+  const image = format === 'banner' && c.bannerFormat === 'horizontal'
+    ? imageProjectionForTarget(r, target)
+    : primaryImageProjection(r);
+  if (image.imageUrl !== undefined) ad.imageUrl = image.imageUrl;
+  if (image.imageFocalPoint !== undefined) ad.imageFocalPoint = image.imageFocalPoint;
   const backgroundColor = str(r.backgroundColor);
   if (backgroundColor !== undefined) ad.backgroundColor = backgroundColor;
   const textColor = str(r.textColor);

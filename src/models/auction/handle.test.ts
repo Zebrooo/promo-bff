@@ -24,9 +24,20 @@ function responsiveCand(id: number, advertiserId: string, cpmKopecks: number): C
       format: 'banner',
       title: 'responsive',
       imageUrl: 'https://i/legacy.png',
+      imageFocalPoint: { xBp: 5000, yBp: 5000 },
       imageVariants: {
-        wide: { imageUrl: 'https://i/wide.png', width: 1200, height: 150 },
-        compact: { imageUrl: 'https://i/compact.png', width: 580, height: 120 },
+        wide: {
+          imageUrl: 'https://i/wide.png',
+          width: 1200,
+          height: 150,
+          focalPoint: { xBp: 1000, yBp: 2000 },
+        },
+        compact: {
+          imageUrl: 'https://i/compact.png',
+          width: 580,
+          height: 120,
+          focalPoint: { xBp: 8000, yBp: 7000 },
+        },
       },
     },
   };
@@ -158,6 +169,8 @@ describe('handleAuction', () => {
     if (compact.status === 'ok' && wide.status === 'ok') {
       expect(compact.data.top?.imageUrl).toBe('https://i/compact.png');
       expect(wide.data.inline?.imageUrl).toBe('https://i/wide.png');
+      expect(compact.data.top?.imageFocalPoint).toEqual({ xBp: 8000, yBp: 7000 });
+      expect(wide.data.inline?.imageFocalPoint).toEqual({ xBp: 1000, yBp: 2000 });
       expect(compact.data.top).not.toHaveProperty('imageVariants');
       expect(wide.data.inline).not.toHaveProperty('imageVariants');
     }
@@ -198,6 +211,8 @@ describe('handleAuction', () => {
     if (res.status === 'ok') {
       expect(res.data.left?.imageUrl).toBe('https://i/compact.png');
       expect(res.data.right?.imageUrl).toBe('https://i/compact.png');
+      expect(res.data.left?.imageFocalPoint).toEqual({ xBp: 8000, yBp: 7000 });
+      expect(res.data.right?.imageFocalPoint).toEqual({ xBp: 8000, yBp: 7000 });
       expect(res.data.left).not.toHaveProperty('imageVariants');
       expect(res.data.right).not.toHaveProperty('imageVariants');
     }
@@ -234,6 +249,7 @@ describe('handleAuction', () => {
     expect(res.status).toBe('ok');
     if (res.status === 'ok') {
       expect(res.data.left?.imageUrl).toBe('https://i/wide.png');
+      expect(res.data.left?.imageFocalPoint).toEqual({ xBp: 1000, yBp: 2000 });
       expect(res.data.right).toBeNull();
       expect(res.data.left).not.toHaveProperty('imageVariants');
     }

@@ -4,6 +4,13 @@ export type SubscriptionLevel = 'none' | 'plus' | 'premium';
 
 export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep' | 'custom';
 
+export interface ImageFocalPoint {
+  /** Horizontal coordinate in basis points: 0 = left, 10_000 = right. */
+  xBp: number;
+  /** Vertical coordinate in basis points: 0 = top, 10_000 = bottom. */
+  yBp: number;
+}
+
 export interface PromoTargeting {
   minAge?: number;
   maxAge?: number;
@@ -55,6 +62,8 @@ export interface Promo {
   title: string;
   description?: string;
   imageUrl?: string;
+  /** Focal metadata for imageUrl. Missing means the renderer uses the centre. */
+  imageFocalPoint?: ImageFocalPoint;
   /** CTA: deep link/route + optional label + optional pill position (tl/tr/bl/br;
    *  default "br" on the storefront). */
   action?: { href: string; label?: string; position?: string };

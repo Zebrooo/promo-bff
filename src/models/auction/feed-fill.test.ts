@@ -10,6 +10,18 @@ function cand(id: number, advertiserId: string, cpmKopecks: number, bannerFormat
   };
 }
 
+function focusedCand(id: number, advertiserId: string, cpmKopecks: number): CampaignCandidate {
+  return {
+    ...cand(id, advertiserId, cpmKopecks),
+    creative: {
+      format: 'banner',
+      title: `ad-${id}`,
+      imageUrl: `https://i/${id}.png`,
+      imageFocalPoint: { xBp: 2500, yBp: 7500 },
+    },
+  };
+}
+
 function makeDeps(
   candidates: CampaignCandidate[],
   balances: Record<string, number>,
@@ -55,6 +67,23 @@ describe('handleFeedFill', () => {
     expect(res.status).toBe('ok');
     if (res.status !== 'ok') return;
     expect(res.data.map((a) => a.id)).toEqual(Array(5).fill('campaign:1'));
+  });
+
+  it('projects the primary image focal point into every repeated feed ad', async () => {
+    const res = await handleFeedFill(
+      { count: 2, format: 'block' },
+      makeDeps([focusedCand(1, 'A', 5000)], { A: 100_000 }),
+    );
+
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.data).toHaveLength(2);
+    expect(res.data.every((ad) => ad.imageUrl === 'https://i/1.png')).toBe(true);
+    expect(res.data.map((ad) => ad.imageFocalPoint)).toEqual([
+      { xBp: 2500, yBp: 7500 },
+      { xBp: 2500, yBp: 7500 },
+    ]);
+    expect(res.data.every((ad) => !('imageVariants' in ad))).toBe(true);
   });
 
   it('excludes malformed creatives before allocating', async () => {

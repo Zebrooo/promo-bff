@@ -13,6 +13,7 @@ describe('campaignToAd', () => {
       title: 'Sale',
       description: '30% off',
       imageUrl: 'https://x/y.png',
+      imageFocalPoint: { xBp: 2500, yBp: 7500 },
       action: { href: '/sale', label: 'Go' },
       backgroundColor: '#fff',
       textColor: '#000',
@@ -25,6 +26,7 @@ describe('campaignToAd', () => {
       title: 'Sale',
       description: '30% off',
       imageUrl: 'https://x/y.png',
+      imageFocalPoint: { xBp: 2500, yBp: 7500 },
       action: { href: '/sale', label: 'Go' },
       backgroundColor: '#fff',
       textColor: '#000',
@@ -58,9 +60,20 @@ describe('campaignToAd', () => {
       format: 'banner',
       title: 'Buy',
       imageUrl: 'https://x/legacy.png',
+      imageFocalPoint: { xBp: 5000, yBp: 5000 },
       imageVariants: {
-        wide: { imageUrl: 'https://x/wide.png', width: 1200, height: 150 },
-        compact: { imageUrl: 'https://x/compact.png', width: 580, height: 120 },
+        wide: {
+          imageUrl: 'https://x/wide.png',
+          width: 1200,
+          height: 150,
+          focalPoint: { xBp: 1000, yBp: 2000 },
+        },
+        compact: {
+          imageUrl: 'https://x/compact.png',
+          width: 580,
+          height: 120,
+          focalPoint: { xBp: 8000, yBp: 7000 },
+        },
       },
       }),
       bannerFormat: 'horizontal',
@@ -71,8 +84,63 @@ describe('campaignToAd', () => {
 
     expect(wide?.imageUrl).toBe('https://x/wide.png');
     expect(compact?.imageUrl).toBe('https://x/compact.png');
+    expect(wide?.imageFocalPoint).toEqual({ xBp: 1000, yBp: 2000 });
+    expect(compact?.imageFocalPoint).toEqual({ xBp: 8000, yBp: 7000 });
     expect(wide).not.toHaveProperty('imageVariants');
     expect(compact).not.toHaveProperty('imageVariants');
+  });
+
+  it('omits malformed variant focal metadata without changing the selected image', () => {
+    const candidate = {
+      ...cand({
+        format: 'banner',
+        title: 'Buy',
+        imageUrl: 'https://x/legacy.png',
+        imageFocalPoint: { xBp: 2500, yBp: 7500 },
+        imageVariants: {
+          wide: {
+            imageUrl: 'https://x/wide.png',
+            width: 1200,
+            height: 150,
+            focalPoint: { xBp: 5000 },
+          },
+          compact: {
+            imageUrl: 'https://x/compact.png',
+            width: 580,
+            height: 120,
+            focalPoint: { xBp: 8000, yBp: 7000 },
+          },
+        },
+      }),
+      bannerFormat: 'horizontal',
+    };
+
+    const wide = campaignToAd(candidate, { width: 1200, height: 150 });
+
+    expect(wide?.imageUrl).toBe('https://x/wide.png');
+    expect(wide).not.toHaveProperty('imageFocalPoint');
+    expect(wide).not.toHaveProperty('imageVariants');
+  });
+
+  it('accepts integer focal bounds and omits invalid primary focal metadata', () => {
+    const project = (imageFocalPoint: unknown) => campaignToAd(cand({
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageFocalPoint,
+    }));
+
+    expect(project({ xBp: 0, yBp: 10_000 })?.imageFocalPoint).toEqual({ xBp: 0, yBp: 10_000 });
+    for (const invalid of [
+      { xBp: -1, yBp: 5000 },
+      { xBp: 5000.5, yBp: 5000 },
+      { xBp: 5000, yBp: 10_001 },
+      { xBp: 5000 },
+    ]) {
+      const ad = project(invalid);
+      expect(ad?.imageUrl).toBe('https://x/legacy.png');
+      expect(ad).not.toHaveProperty('imageFocalPoint');
+    }
   });
 
   it('falls back to the canonical image for legacy requests or a malformed variant pair', () => {
