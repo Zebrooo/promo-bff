@@ -3,11 +3,14 @@ import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
+import type { SearchHistoryService } from '../../services/search-history-service';
 import type { CheckerStatsService } from '../../services/checker-stats';
 import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
+import type { SearchHistoryEntry } from '../../promo-selector/checkers';
+import { hasSearchRule } from '../../promo-selector/checkers/registry/Search';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -22,6 +25,7 @@ export interface SelectPromoDeps {
   billingService: BillingService;
   impressionStore: ImpressionStore;
   listingService: ListingService;
+  searchHistoryService: SearchHistoryService;
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
@@ -29,6 +33,31 @@ export interface SelectPromoDeps {
   selectionTrace?: SelectionTraceService;
   /** Injectable clock for deterministic tests; defaults to real time. */
   now?: () => Date;
+}
+
+/**
+ * Load search history only when this walk can actually evaluate a search rule.
+ * Failures degrade to an empty history so targeted promos fail closed while a
+ * generic candidate later in the same queue remains available.
+ */
+export async function loadSearchHistoryForSelection(
+  params: SelectPromoParams,
+  promos: Promo[],
+  skip: string[],
+  deps: SelectPromoDeps,
+  logPrefix: 'select-promo' | 'select-promo-list',
+): Promise<SearchHistoryEntry[]> {
+  if (skip.includes('search') || !params.viewerKey || !promos.some(hasSearchRule)) return [];
+
+  try {
+    return await deps.searchHistoryService.getSearchHistory(params.viewerKey);
+  } catch (err) {
+    deps.logger?.error(
+      { error: err instanceof Error ? err.message : 'unknown error' },
+      `${logPrefix}: search history unavailable`,
+    );
+    return [];
+  }
 }
 
 /**
@@ -93,6 +122,7 @@ export async function handleSelectPromo(
   }
 
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
+  const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo');
 
   let promo: Promo | null;
   let trace: SelectionTrace | undefined;
@@ -109,6 +139,7 @@ export async function handleSelectPromo(
         device: params.device,
         formats: params.formats,
         excludeIds: params.excludeIds,
+        searchHistory,
       },
       {
         skip,

@@ -40,6 +40,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   billingService: fakeBillingService(),
   impressionStore: fakeImpressionStore(),
   listingService: fakeListingService(),
+  searchHistoryService: { getSearchHistory: async () => [] },
   ...over,
 });
 
@@ -528,5 +529,102 @@ describe('handleSelectPromo', () => {
       listingService: fakeListingService({ getListingStats: async () => ({ activeListings: 0 }) }),
     }));
     expect(buyer.status).toBe('skipped');
+  });
+
+  it('loads search history once and selects a matching search-targeted promo', async () => {
+    let loads = 0;
+    const targeted = makePromo({
+      id: 'search-targeted',
+      targeting: { search: { terms: ['toyota camry'], sections: ['avto'] } },
+    });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [targeted, makePromo({ id: 'generic' })], persist: false }),
+    });
+    const result = await handleSelectPromo(
+      { userId: 'u-search', viewerKey: 'viewer-search' },
+      deps({
+        configService,
+        now: () => new Date('2026-08-12T12:00:00.000Z'),
+        searchHistoryService: {
+          getSearchHistory: async (viewerKey) => {
+            loads += 1;
+            expect(viewerKey).toBe('viewer-search');
+            return [{ query: 'Toyota Camry 70', section: 'avto', createdAt: '2026-08-11T12:00:00.000Z' }];
+          },
+        },
+      }),
+    );
+    expect(loads).toBe(1);
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'search-targeted' } });
+  });
+
+  it('fails a non-matching targeted promo closed and falls through to generic', async () => {
+    const targeted = makePromo({
+      id: 'search-targeted',
+      targeting: { search: { terms: ['toyota'] } },
+    });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [targeted, makePromo({ id: 'generic' })], persist: false }),
+    });
+    const result = await handleSelectPromo(
+      { userId: 'u-search', viewerKey: 'viewer-search' },
+      deps({
+        configService,
+        now: () => new Date('2026-08-12T12:00:00.000Z'),
+        searchHistoryService: {
+          getSearchHistory: async () => [
+            { query: 'Honda Fit', section: 'avto', createdAt: '2026-08-11T12:00:00.000Z' },
+          ],
+        },
+      }),
+    );
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'generic' } });
+  });
+
+  it('keeps generic fallback available when search history loading fails', async () => {
+    const errors: { obj: unknown; msg?: string }[] = [];
+    const targeted = makePromo({ id: 'targeted', targeting: { search: { sections: ['avto'] } } });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [targeted, makePromo({ id: 'generic' })], persist: false }),
+    });
+    const logger = {
+      info: () => {},
+      error: (obj: unknown, msg?: string) => errors.push({ obj, msg }),
+    };
+    const result = await handleSelectPromo(
+      { userId: 'u-search', viewerKey: 'viewer-search' },
+      deps({
+        configService,
+        logger,
+        searchHistoryService: { getSearchHistory: async () => { throw new Error('database unavailable'); } },
+      }),
+    );
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'generic' } });
+    expect(errors).toContainEqual({
+      obj: { error: 'database unavailable' },
+      msg: 'select-promo: search history unavailable',
+    });
+  });
+
+  it('does not load history without a usable rule/viewerKey or when search is skipped', async () => {
+    let loads = 0;
+    const searchHistoryService = {
+      getSearchHistory: async () => {
+        loads += 1;
+        return [];
+      },
+    };
+    await handleSelectPromo({ userId: 'generic', viewerKey: 'viewer' }, deps({ searchHistoryService }));
+
+    const targeted = makePromo({ id: 'targeted', targeting: { search: { terms: ['toyota'] } } });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [targeted, makePromo({ id: 'generic' })], persist: false }),
+    });
+    await handleSelectPromo({ userId: 'no-viewer' }, deps({ configService, searchHistoryService }));
+    await handleSelectPromo(
+      { userId: 'skipped', viewerKey: 'viewer', skipCheckers: ['search'] },
+      deps({ configService, searchHistoryService }),
+    );
+    expect(loads).toBe(0);
   });
 });

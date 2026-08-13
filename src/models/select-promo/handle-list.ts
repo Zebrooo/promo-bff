@@ -1,6 +1,11 @@
 import type { Promo } from '../../promo-selector/types';
 import { selectPromoList, type SelectionTrace } from '../../promo-selector';
-import { stripToAdvertisement, recordTraceObservability, type SelectPromoDeps } from './handle';
+import {
+  loadSearchHistoryForSelection,
+  stripToAdvertisement,
+  recordTraceObservability,
+  type SelectPromoDeps,
+} from './handle';
 import { resolveUserIdentity, type PromoListResult, type SelectPromoParams } from './types';
 
 /**
@@ -39,6 +44,7 @@ export async function handleSelectPromoList(
   // chain always dropped (order = queue index). Persist queues auto-skip limit+cooldown
   // (as select-promo does); on replay the route adds ['limit','cooldown'] via skipCheckers.
   const skip = [...(params.skipCheckers ?? []), 'chain', ...(persist ? ['limit', 'cooldown'] : [])];
+  const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo-list');
 
   let steps: Promo[];
   let trace: SelectionTrace | undefined;
@@ -55,6 +61,7 @@ export async function handleSelectPromoList(
         device: params.device,
         formats: params.formats,
         excludeIds: params.excludeIds,
+        searchHistory,
       },
       {
         skip,

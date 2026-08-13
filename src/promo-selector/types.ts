@@ -11,6 +11,17 @@ export interface PromoTargeting {
   regions?: string[];
   /** Allowed subscription levels; empty/omitted means "any level". */
   subscriptionLevels?: SubscriptionLevel[];
+  /** Search-history gate. Omitted/empty means no search targeting. */
+  search?: {
+    /** Normalized phrases to find in past search queries. */
+    terms?: string[];
+    /** Search sections to allow (exact match after normalization). */
+    sections?: string[];
+    /** Whether any term or every term must be present. Defaults to `any`. */
+    match?: 'any' | 'all';
+    /** Rolling history window. Defaults to 30 days. */
+    lookbackDays?: number;
+  };
 }
 
 /**

@@ -48,6 +48,44 @@ describe('promoSchema', () => {
   it('rejects a non-string section', () => {
     expect(() => promoSchema.parse(makePromo({ sections: [1] as never }))).toThrow();
   });
+
+  it('accepts and trims bounded search targeting', () => {
+    const parsed = promoSchema.parse(makePromo({
+      targeting: {
+        search: {
+          terms: ['  Toyota Camry  ', 'внедорожник'],
+          sections: ['  avto  '],
+          match: 'all',
+          lookbackDays: 14,
+        },
+      },
+    }));
+    expect(parsed.targeting.search).toEqual({
+      terms: ['Toyota Camry', 'внедорожник'],
+      sections: ['avto'],
+      match: 'all',
+      lookbackDays: 14,
+    });
+  });
+
+  it('rejects invalid search targeting bounds and match mode', () => {
+    const parseSearch = (search: Record<string, unknown>) =>
+      promoSchema.parse(makePromo({ targeting: { search } as never }));
+
+    expect(() => parseSearch({ terms: ['x'] })).toThrow();
+    expect(() => parseSearch({ terms: ['--'] })).toThrow();
+    expect(() => parseSearch({ terms: ['C++'] })).toThrow();
+    expect(() => parseSearch({ terms: ['x'.repeat(81)] })).toThrow();
+    expect(() => parseSearch({ terms: Array.from({ length: 21 }, () => 'ok') })).toThrow();
+    expect(() => parseSearch({ sections: [''] })).toThrow();
+    expect(() => parseSearch({ sections: ['-'] })).toThrow();
+    expect(() => parseSearch({ sections: ['x'.repeat(41)] })).toThrow();
+    expect(() => parseSearch({ sections: Array.from({ length: 21 }, () => 'avto') })).toThrow();
+    expect(() => parseSearch({ match: 'some' })).toThrow();
+    expect(() => parseSearch({ lookbackDays: 0 })).toThrow();
+    expect(() => parseSearch({ lookbackDays: 31 })).toThrow();
+    expect(() => parseSearch({ lookbackDays: 1.5 })).toThrow();
+  });
 });
 
 describe('multistep format (steps)', () => {

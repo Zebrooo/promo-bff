@@ -17,6 +17,7 @@ import { createCheckerStatsService, type CheckerStatsService } from './services/
 import { createSelectionTraceService, type SelectionTraceService } from './services/selection-trace';
 import { withTimeout } from './util/with-timeout';
 import { createListingService } from './services/listing-service';
+import { createSearchHistoryService } from './services/search-history-service';
 import { createCampaignService } from './services/campaign-service';
 import { createBalanceService } from './services/balance-service';
 import { isModelName, modelRegistry } from './models/registry';
@@ -154,6 +155,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     billingService: createBillingService(),
     impressionStore: createImpressionStore(),
     listingService: createListingService(),
+    searchHistoryService: createSearchHistoryService(),
     checkerStats,
     selectionTrace,
     logger: app.log,

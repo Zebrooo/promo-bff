@@ -24,6 +24,14 @@ export interface CheckContext {
    * surface separation stayed at the queue level).
    */
   formats?: string[];
+  /** Search rows preloaded once for the whole selection walk. */
+  searchHistory?: SearchHistoryEntry[];
+}
+
+export interface SearchHistoryEntry {
+  query: string;
+  section: string;
+  createdAt: string;
 }
 
 /** All known supplier ids. */
