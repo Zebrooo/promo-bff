@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleSelectPromo, type SelectPromoDeps } from './handle';
+import { handleSelectPromo, loadWalletDataForSelection, type SelectPromoDeps } from './handle';
 import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
@@ -41,6 +41,8 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   impressionStore: fakeImpressionStore(),
   listingService: fakeListingService(),
   searchHistoryService: { getSearchHistory: async () => [] },
+  purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+  balanceService: { getBalances: async () => new Map() },
   ...over,
 });
 
@@ -626,5 +628,191 @@ describe('handleSelectPromo', () => {
       deps({ configService, searchHistoryService }),
     );
     expect(loads).toBe(0);
+  });
+});
+
+describe('loadWalletDataForSelection', () => {
+  const purchaseTargeted = makePromo({ id: 'purchase-targeted', targeting: { purchases: { purchased: true } } });
+  const balanceTargeted = makePromo({ id: 'balance-targeted', targeting: { balance: { currentAbove: 0, movementAbove: 0 } } });
+  // Wallet lookups only run for an authorized identity (anonymous viewers are
+  // gated out before any I/O — see the dedicated anonymous test below), so
+  // every test in this block that expects the wallet services to actually be
+  // called must identify as authorized.
+  const authUser = { isAuthorized: true, identityKind: 'account' as const };
+
+  it('loads purchases/balance/movement exactly once per selection walk (not once per checker/candidate)', async () => {
+    let purchaseCalls = 0;
+    let balanceCalls = 0;
+    let movementCalls = 0;
+    const walletDeps = deps({
+      purchaseLedgerService: {
+        getPurchases: async () => {
+          purchaseCalls += 1;
+          return [];
+        },
+        getMovement: async () => {
+          movementCalls += 1;
+          return 1000;
+        },
+      },
+      balanceService: {
+        getBalances: async () => {
+          balanceCalls += 1;
+          return new Map([['u1', 50000]]);
+        },
+      },
+    });
+    const result = await loadWalletDataForSelection(
+      { userId: 'u1', user: authUser },
+      [purchaseTargeted, balanceTargeted],
+      [],
+      walletDeps,
+      'select-promo',
+    );
+    expect(purchaseCalls).toBe(1);
+    expect(balanceCalls).toBe(1);
+    expect(movementCalls).toBe(1);
+    expect(result.walletBalanceKopecks).toBe(50000);
+  });
+
+  it('fail-soft: a getPurchases rejection degrades purchases to undefined (unavailable, not a genuine empty) without throwing and without blocking balance/movement', async () => {
+    const errors: { obj: unknown; msg?: string }[] = [];
+    const logger = { info: () => {}, error: (obj: unknown, msg?: string) => errors.push({ obj, msg }) };
+    const walletDeps = deps({
+      purchaseLedgerService: {
+        getPurchases: async () => { throw new Error('ledger unavailable'); },
+        getMovement: async () => 7000,
+      },
+      balanceService: { getBalances: async () => new Map([['u1', 20000]]) },
+      logger,
+    });
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    expect(result.purchases).toBeUndefined();
+    expect(result.walletBalanceKopecks).toBe(20000);
+    expect(result.walletMovementByWindow.get(undefined)).toBe(7000);
+    expect(errors).toContainEqual({ obj: { error: 'ledger unavailable' }, msg: 'select-promo: purchase history unavailable' });
+  });
+
+  it('fail-soft: a getBalances rejection degrades walletBalanceKopecks to undefined without throwing and without blocking purchases/movement', async () => {
+    const errors: { obj: unknown; msg?: string }[] = [];
+    const logger = { info: () => {}, error: (obj: unknown, msg?: string) => errors.push({ obj, msg }) };
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => [{ pack: 'bump', amountKopecks: 100, createdAt: '2026-01-01T00:00:00.000Z' }], getMovement: async () => 3000 },
+      balanceService: { getBalances: async () => { throw new Error('balance unavailable'); } },
+      logger,
+    });
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    expect(result.walletBalanceKopecks).toBeUndefined();
+    expect(result.purchases).toHaveLength(1);
+    expect(result.walletMovementByWindow.get(undefined)).toBe(3000);
+    expect(errors).toContainEqual({ obj: { error: 'balance unavailable' }, msg: 'select-promo: wallet balance unavailable' });
+  });
+
+  it('marks walletBalanceUnavailable: true only when getBalances actually threw (outage), distinct from a genuinely absent wallet account', async () => {
+    const failed = deps({
+      purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+      balanceService: { getBalances: async () => { throw new Error('balance unavailable'); } },
+    });
+    const failedResult = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [balanceTargeted], [], failed, 'select-promo');
+    expect(failedResult.walletBalanceUnavailable).toBe(true);
+
+    const succeeded = deps({
+      purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+      balanceService: { getBalances: async () => new Map() }, // succeeds, just no row for this user
+    });
+    const succeededResult = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [balanceTargeted], [], succeeded, 'select-promo');
+    expect(succeededResult.walletBalanceUnavailable).toBeUndefined();
+  });
+
+  it('fail-soft: a getMovement rejection degrades only that window to absent without throwing and without blocking purchases/balance', async () => {
+    const errors: { obj: unknown; msg?: string }[] = [];
+    const logger = { info: () => {}, error: (obj: unknown, msg?: string) => errors.push({ obj, msg }) };
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => { throw new Error('movement unavailable'); } },
+      balanceService: { getBalances: async () => new Map([['u1', 40000]]) },
+      logger,
+    });
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
+    expect(result.walletMovementByWindow.has(undefined)).toBe(false);
+    expect(result.walletBalanceKopecks).toBe(40000);
+    expect(errors).toContainEqual({
+      obj: { error: 'movement unavailable', window: undefined },
+      msg: 'select-promo: wallet movement unavailable',
+    });
+  });
+
+  it('does not call any wallet service when no promo in the queue has a purchases/balance rule', async () => {
+    let called = false;
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => { called = true; return []; }, getMovement: async () => { called = true; return 0; } },
+      balanceService: { getBalances: async () => { called = true; return new Map(); } },
+    });
+    const result = await loadWalletDataForSelection({ userId: 'u1' }, [makePromo({ id: 'generic' })], [], walletDeps, 'select-promo');
+    expect(called).toBe(false);
+    expect(result.purchases).toEqual([]);
+    expect(result.walletMovementByWindow.size).toBe(0);
+  });
+
+  it('does not call any wallet service for an anonymous identity, even when the queue has a purchases/balance rule (PurchaseChecker/BalanceChecker hard-fail anonymous viewers anyway)', async () => {
+    let called = false;
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => { called = true; return []; }, getMovement: async () => { called = true; return 0; } },
+      balanceService: { getBalances: async () => { called = true; return new Map(); } },
+    });
+    const result = await loadWalletDataForSelection(
+      { userId: 'anon-1', user: { isAuthorized: false, identityKind: 'anonymous' } },
+      [purchaseTargeted, balanceTargeted],
+      [],
+      walletDeps,
+      'select-promo',
+    );
+    expect(called).toBe(false);
+    expect(result.purchases).toEqual([]);
+    expect(result.walletBalanceKopecks).toBeUndefined();
+    expect(result.walletMovementByWindow.size).toBe(0);
+  });
+
+  it('does not call the purchase/balance service when the corresponding checker is in skip, even though promos have the rule', async () => {
+    let called = false;
+    const walletDeps = deps({
+      purchaseLedgerService: { getPurchases: async () => { called = true; return []; }, getMovement: async () => { called = true; return 0; } },
+      balanceService: { getBalances: async () => { called = true; return new Map(); } },
+    });
+    const result = await loadWalletDataForSelection(
+      { userId: 'u1' },
+      [purchaseTargeted, balanceTargeted],
+      ['purchases', 'balance'],
+      walletDeps,
+      'select-promo',
+    );
+    expect(called).toBe(false);
+    expect(result.purchases).toEqual([]);
+    expect(result.walletMovementByWindow.size).toBe(0);
+  });
+
+  it('fetches one movement value PER DISTINCT window: two promos with different movementLookbackDays produce two getMovement calls with two different sinceMs, folded into two Map entries (regression for the shared-max-window bug)', async () => {
+    const calls: { userId: string; sinceMs?: number }[] = [];
+    const walletDeps = deps({
+      purchaseLedgerService: {
+        getPurchases: async () => [],
+        getMovement: async (userId: string, sinceMs?: number) => {
+          calls.push({ userId, sinceMs });
+          if (sinceMs === undefined) return -1; // sentinel, should not be hit in this test
+          const daysAgo = Math.round((Date.now() - sinceMs) / (24 * 60 * 60 * 1000));
+          return daysAgo === 7 ? 5000 : 90000;
+        },
+      },
+      balanceService: { getBalances: async () => new Map() },
+    });
+    const promo7 = makePromo({ id: 'weekly', targeting: { balance: { movementAbove: 0, movementLookbackDays: 7 } } });
+    const promo30 = makePromo({ id: 'monthly', targeting: { balance: { movementAbove: 0, movementLookbackDays: 30 } } });
+    const result = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [promo7, promo30], [], walletDeps, 'select-promo');
+
+    expect(calls).toHaveLength(2);
+    const sinceMsValues = calls.map((c) => c.sinceMs);
+    expect(new Set(sinceMsValues).size).toBe(2);
+    expect(result.walletMovementByWindow.get(7)).toBe(5000);
+    expect(result.walletMovementByWindow.get(30)).toBe(90000);
+    expect(result.walletMovementByWindow.has(undefined)).toBe(false);
   });
 });

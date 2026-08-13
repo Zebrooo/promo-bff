@@ -20,6 +20,8 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   impressionStore: { getImpressions: async () => ({ counts: {}, lastShownAt: {} }), recordImpression: async () => {} } as ImpressionStore,
   listingService: { getListingStats: async () => ({ activeListings: 0 }) } as ListingService,
   searchHistoryService: { getSearchHistory: async () => [] },
+  purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+  balanceService: { getBalances: async () => new Map() },
   ...over,
 });
 

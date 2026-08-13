@@ -9,8 +9,12 @@ import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
-import type { SearchHistoryEntry } from '../../promo-selector/checkers';
+import type { SearchHistoryEntry, PurchaseEntry } from '../../promo-selector/checkers';
 import { hasSearchRule } from '../../promo-selector/checkers/registry/Search';
+import type { PurchaseLedgerService } from '../../services/purchase-ledger-service';
+import type { BalanceService } from '../../services/balance-service';
+import { hasPurchaseRule } from '../../promo-selector/checkers/registry/Purchases';
+import { hasBalanceRule } from '../../promo-selector/checkers/registry/Balance';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -26,6 +30,8 @@ export interface SelectPromoDeps {
   impressionStore: ImpressionStore;
   listingService: ListingService;
   searchHistoryService: SearchHistoryService;
+  purchaseLedgerService: PurchaseLedgerService;
+  balanceService: BalanceService;
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
@@ -58,6 +64,106 @@ export async function loadSearchHistoryForSelection(
     );
     return [];
   }
+}
+
+/**
+ * Loads wallet data (purchases + current balance + movement) only when this
+ * walk can actually evaluate a purchases/balance rule — same short-circuit
+ * shape as loadSearchHistoryForSelection. Three independent reads run in
+ * parallel; a failure in any one degrades that piece to an explicitly
+ * "unavailable" marker (undefined purchases, walletBalanceUnavailable: true,
+ * or an absent movement-window entry) rather than a value that looks like a
+ * genuine empty/zero result. The checkers then fail the WHOLE rule closed
+ * when data it needs is unavailable, instead of quietly defaulting to 0/[]
+ * — an outage must never let a targeting rule pass for a user whose real
+ * data is simply unknown. This does not block the other two reads or the
+ * rest of selection: each piece degrades independently.
+ */
+export async function loadWalletDataForSelection(
+  params: SelectPromoParams,
+  promos: Promo[],
+  skip: string[],
+  deps: SelectPromoDeps,
+  logPrefix: 'select-promo' | 'select-promo-list',
+): Promise<{
+  purchases: PurchaseEntry[] | undefined;
+  walletBalanceKopecks?: number;
+  walletBalanceUnavailable?: boolean;
+  walletMovementByWindow: Map<number | undefined, number>;
+}> {
+  const empty = {
+    purchases: [] as PurchaseEntry[],
+    walletBalanceKopecks: undefined,
+    walletBalanceUnavailable: undefined,
+    walletMovementByWindow: new Map<number | undefined, number>(),
+  };
+  if (!params.userId || !resolveUserIdentity(params.user).isAuthorized) return empty;
+
+  const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
+  const needsBalance = !skip.includes('balance') && promos.some(hasBalanceRule);
+  if (!needsPurchases && !needsBalance) return empty;
+
+  const purchaseLookbackDays = needsPurchases
+    ? Math.max(...promos.filter(hasPurchaseRule).map((p) => p.targeting.purchases!.lookbackDays ?? 30))
+    : 0;
+  const needsCurrentBalance = needsBalance && promos.some(
+    (p) => hasBalanceRule(p) && (p.targeting.balance!.currentAbove !== undefined || p.targeting.balance!.currentBelow !== undefined),
+  );
+  // Movement is pre-aggregated server-side per window, so (unlike purchases) it
+  // can't be re-filtered after the fact — fetch one value PER DISTINCT window any
+  // movement-gating promo actually requests (undefined = all-time bucket), not a
+  // single queue-wide max. Two promos in the same queue with different
+  // movementLookbackDays each get their own correct sum.
+  const movementWindows = needsBalance
+    ? [...new Set(
+        promos
+          .filter((p) => hasBalanceRule(p) && (p.targeting.balance!.movementAbove !== undefined || p.targeting.balance!.movementBelow !== undefined))
+          .map((p) => p.targeting.balance!.movementLookbackDays),
+      )]
+    : [];
+
+  let balanceFetchFailed = false;
+
+  const [purchases, balances, movementEntries] = await Promise.all([
+    needsPurchases
+      ? deps.purchaseLedgerService.getPurchases(params.userId, Date.now() - purchaseLookbackDays * 24 * 60 * 60 * 1000).catch((err) => {
+          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: purchase history unavailable`);
+          return undefined;
+        })
+      : Promise.resolve([] as PurchaseEntry[]),
+    needsCurrentBalance
+      ? deps.balanceService.getBalances([params.userId]).catch((err) => {
+          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: wallet balance unavailable`);
+          balanceFetchFailed = true;
+          return new Map<string, number>();
+        })
+      : Promise.resolve(new Map<string, number>()),
+    // Fetch each distinct window in parallel; a single window's failure degrades
+    // only that entry to "absent" (Balance checker then treats it as 0 movement)
+    // without rejecting the outer Promise.all or blocking purchases/balance.
+    Promise.all(
+      movementWindows.map(async (windowDays) => {
+        const sinceMs = windowDays !== undefined ? Date.now() - windowDays * 24 * 60 * 60 * 1000 : undefined;
+        try {
+          const value = await deps.purchaseLedgerService.getMovement(params.userId, sinceMs);
+          return [windowDays, value] as const;
+        } catch (err) {
+          deps.logger?.error(
+            { error: err instanceof Error ? err.message : 'unknown error', window: windowDays },
+            `${logPrefix}: wallet movement unavailable`,
+          );
+          return null;
+        }
+      }),
+    ),
+  ]);
+
+  return {
+    purchases,
+    walletBalanceKopecks: balances.get(params.userId),
+    walletBalanceUnavailable: balanceFetchFailed ? true : undefined,
+    walletMovementByWindow: new Map(movementEntries.filter((e): e is readonly [number | undefined, number] => e !== null)),
+  };
 }
 
 /**
@@ -123,6 +229,7 @@ export async function handleSelectPromo(
 
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
   const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo');
+  const wallet = await loadWalletDataForSelection(params, promos, skip, deps, 'select-promo');
 
   let promo: Promo | null;
   let trace: SelectionTrace | undefined;
@@ -140,6 +247,10 @@ export async function handleSelectPromo(
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,
+        purchases: wallet.purchases,
+        walletBalanceKopecks: wallet.walletBalanceKopecks,
+        walletBalanceUnavailable: wallet.walletBalanceUnavailable,
+        walletMovementByWindow: wallet.walletMovementByWindow,
       },
       {
         skip,

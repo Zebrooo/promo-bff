@@ -6,6 +6,7 @@ import {
   WEB_CHECKERS,
   type CheckContext,
   type Logger,
+  type PurchaseEntry,
   type SearchHistoryEntry,
   type SupplierDeps,
   type SupplierId,
@@ -62,6 +63,14 @@ export interface SelectPromoContext {
   excludeIds?: string[];
   /** Search rows preloaded once by the model handler. */
   searchHistory?: SearchHistoryEntry[];
+  /** Purchase history preloaded once by the model handler. */
+  purchases?: PurchaseEntry[];
+  /** Current wallet balance, preloaded once by the model handler. */
+  walletBalanceKopecks?: number;
+  /** True only when the balance fetch itself failed (outage) — distinct from a genuinely absent wallet account, which is a legitimate 0. */
+  walletBalanceUnavailable?: boolean;
+  /** Net wallet movement per requested window, preloaded once by the model handler. */
+  walletMovementByWindow?: Map<number | undefined, number>;
 }
 
 export interface SelectPromoOptions {
@@ -131,6 +140,10 @@ async function evaluateCandidate(
     device: ctx.device,
     formats: ctx.formats,
     searchHistory: ctx.searchHistory,
+    purchases: ctx.purchases,
+    walletBalanceKopecks: ctx.walletBalanceKopecks,
+    walletBalanceUnavailable: ctx.walletBalanceUnavailable,
+    walletMovementByWindow: ctx.walletMovementByWindow,
   };
   const checks: CheckerTraceEntry[] = [];
   let passed = true;

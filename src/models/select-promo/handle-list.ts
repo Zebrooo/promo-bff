@@ -2,6 +2,7 @@ import type { Promo } from '../../promo-selector/types';
 import { selectPromoList, type SelectionTrace } from '../../promo-selector';
 import {
   loadSearchHistoryForSelection,
+  loadWalletDataForSelection,
   stripToAdvertisement,
   recordTraceObservability,
   type SelectPromoDeps,
@@ -45,6 +46,7 @@ export async function handleSelectPromoList(
   // (as select-promo does); on replay the route adds ['limit','cooldown'] via skipCheckers.
   const skip = [...(params.skipCheckers ?? []), 'chain', ...(persist ? ['limit', 'cooldown'] : [])];
   const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo-list');
+  const wallet = await loadWalletDataForSelection(params, promos, skip, deps, 'select-promo-list');
 
   let steps: Promo[];
   let trace: SelectionTrace | undefined;
@@ -62,6 +64,10 @@ export async function handleSelectPromoList(
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,
+        purchases: wallet.purchases,
+        walletBalanceKopecks: wallet.walletBalanceKopecks,
+        walletBalanceUnavailable: wallet.walletBalanceUnavailable,
+        walletMovementByWindow: wallet.walletMovementByWindow,
       },
       {
         skip,

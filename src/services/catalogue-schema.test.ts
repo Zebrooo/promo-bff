@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogueSchema, promoFormatSchema, promoSchema, queueSchema } from './catalogue-schema';
+import { catalogueSchema, parsePoolLeniently, promoFormatSchema, promoSchema, queueSchema } from './catalogue-schema';
 import type { PromoFormat } from '../promo-selector/types';
 import { makePromo } from '../test-utils';
 
@@ -85,6 +85,77 @@ describe('promoSchema', () => {
     expect(() => parseSearch({ lookbackDays: 0 })).toThrow();
     expect(() => parseSearch({ lookbackDays: 31 })).toThrow();
     expect(() => parseSearch({ lookbackDays: 1.5 })).toThrow();
+  });
+});
+
+describe('purchases/balance targeting (regression: must not be stripped by z.object)', () => {
+  // Bug: targeting was a plain z.object({...}) without `purchases`/`balance`
+  // keys, so zod's default strip behaviour silently dropped these fields
+  // before PurchaseChecker/BalanceChecker ever saw them — the checkers would
+  // always see `undefined` and always shouldSkip(). This locks in the fix.
+  it('preserves targeting.purchases through promoSchema.safeParse', () => {
+    const purchases = { purchased: true, minTotalKopecks: 50000 };
+    const result = promoSchema.safeParse(makePromo({ targeting: { purchases } }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.targeting.purchases).toEqual(purchases);
+    }
+  });
+
+  it('preserves targeting.balance through promoSchema.safeParse', () => {
+    const balance = { currentAbove: 10000, movementLookbackDays: 30 };
+    const result = promoSchema.safeParse(makePromo({ targeting: { balance } }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.targeting.balance).toEqual(balance);
+    }
+  });
+
+  it('preserves targeting.purchases and targeting.balance through parsePoolLeniently', () => {
+    const purchases = { purchased: true, minTotalKopecks: 50000 };
+    const balance = { currentAbove: 10000, movementLookbackDays: 30 };
+    const { promos, rejected } = parsePoolLeniently([
+      makePromo({ targeting: { purchases, balance } }),
+    ]);
+    expect(rejected).toEqual([]);
+    expect(promos).toHaveLength(1);
+    expect(promos[0].targeting.purchases).toEqual(purchases);
+    expect(promos[0].targeting.balance).toEqual(balance);
+  });
+
+  it('rejects an unknown pack type in targeting.purchases.packTypes', () => {
+    const parsePurchases = (purchases: Record<string, unknown>) =>
+      promoSchema.safeParse(makePromo({ targeting: { purchases } as never }));
+
+    expect(parsePurchases({ packTypes: ['gold'] }).success).toBe(false);
+    expect(parsePurchases({ packTypes: ['bump', 'premium', 'vip'] }).success).toBe(true);
+  });
+
+  it('rejects an out-of-range lookbackDays in targeting.purchases', () => {
+    const parsePurchases = (purchases: Record<string, unknown>) =>
+      promoSchema.safeParse(makePromo({ targeting: { purchases } as never }));
+
+    expect(parsePurchases({ lookbackDays: 0 }).success).toBe(false);
+    expect(parsePurchases({ lookbackDays: 366 }).success).toBe(false);
+    expect(parsePurchases({ lookbackDays: 1.5 }).success).toBe(false);
+    expect(parsePurchases({ lookbackDays: 365 }).success).toBe(true);
+  });
+
+  it('rejects an out-of-range movementLookbackDays in targeting.balance', () => {
+    const parseBalance = (balance: Record<string, unknown>) =>
+      promoSchema.safeParse(makePromo({ targeting: { balance } as never }));
+
+    expect(parseBalance({ movementLookbackDays: 0 }).success).toBe(false);
+    expect(parseBalance({ movementLookbackDays: 366 }).success).toBe(false);
+    expect(parseBalance({ movementLookbackDays: 365 }).success).toBe(true);
+  });
+
+  it('rejects an unknown pack type via parsePoolLeniently (item dropped, not the whole pool)', () => {
+    const good = makePromo({ id: 'good' });
+    const bad = makePromo({ id: 'bad', targeting: { purchases: { packTypes: ['gold'] } } as never });
+    const { promos, rejected } = parsePoolLeniently([good, bad]);
+    expect(promos.map((p) => p.id)).toEqual(['good']);
+    expect(rejected.map((r) => r.promoId)).toEqual(['bad']);
   });
 });
 

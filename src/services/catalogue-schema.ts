@@ -16,6 +16,26 @@ export const searchTargetingSchema = z.object({
   lookbackDays: z.number().int().min(1).max(30).optional(),
 });
 
+export const packTypeSchema = z.enum(['bump', 'premium', 'vip']);
+
+export const purchasesTargetingSchema = z.object({
+  purchased: z.boolean().optional(),
+  minTotalKopecks: z.number().int().nonnegative().optional(),
+  maxTotalKopecks: z.number().int().nonnegative().optional(),
+  minCount: z.number().int().nonnegative().optional(),
+  maxCount: z.number().int().nonnegative().optional(),
+  packTypes: z.array(packTypeSchema).optional(),
+  lookbackDays: z.number().int().min(1).max(365).optional(),
+});
+
+export const balanceTargetingSchema = z.object({
+  currentAbove: z.number().int().optional(),
+  currentBelow: z.number().int().optional(),
+  movementAbove: z.number().int().optional(),
+  movementBelow: z.number().int().optional(),
+  movementLookbackDays: z.number().int().min(1).max(365).optional(),
+});
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
@@ -28,6 +48,8 @@ export const promoSchema = z.object({
     regions: z.array(z.string()).optional(),
     subscriptionLevels: z.array(subscriptionLevelSchema).optional(),
     search: searchTargetingSchema.optional(),
+    purchases: purchasesTargetingSchema.optional(),
+    balance: balanceTargetingSchema.optional(),
   }),
   // Optional per-user cap. Legacy data used 0 = unlimited; coerce that to
   // undefined (the new "unlimited") so old catalogues still parse.
