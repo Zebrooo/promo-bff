@@ -6,6 +6,7 @@ import {
   WEB_CHECKERS,
   type CheckContext,
   type Logger,
+  type PurchaseEntry,
   type SearchHistoryEntry,
   type SupplierDeps,
   type SupplierId,
@@ -62,6 +63,12 @@ export interface SelectPromoContext {
   excludeIds?: string[];
   /** Search rows preloaded once by the model handler. */
   searchHistory?: SearchHistoryEntry[];
+  /** Purchase history preloaded once by the model handler. */
+  purchases?: PurchaseEntry[];
+  /** Current wallet balance, preloaded once by the model handler. */
+  walletBalanceKopecks?: number;
+  /** Wallet movement sum, preloaded once by the model handler. */
+  walletMovementKopecks?: number;
 }
 
 export interface SelectPromoOptions {
@@ -131,6 +138,9 @@ async function evaluateCandidate(
     device: ctx.device,
     formats: ctx.formats,
     searchHistory: ctx.searchHistory,
+    purchases: ctx.purchases,
+    walletBalanceKopecks: ctx.walletBalanceKopecks,
+    walletMovementKopecks: ctx.walletMovementKopecks,
   };
   const checks: CheckerTraceEntry[] = [];
   let passed = true;

@@ -9,8 +9,12 @@ import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
-import type { SearchHistoryEntry } from '../../promo-selector/checkers';
+import type { SearchHistoryEntry, PurchaseEntry } from '../../promo-selector/checkers';
 import { hasSearchRule } from '../../promo-selector/checkers/registry/Search';
+import type { PurchaseLedgerService } from '../../services/purchase-ledger-service';
+import type { BalanceService } from '../../services/balance-service';
+import { hasPurchaseRule } from '../../promo-selector/checkers/registry/Purchases';
+import { hasBalanceRule } from '../../promo-selector/checkers/registry/Balance';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -26,6 +30,8 @@ export interface SelectPromoDeps {
   impressionStore: ImpressionStore;
   listingService: ListingService;
   searchHistoryService: SearchHistoryService;
+  purchaseLedgerService: PurchaseLedgerService;
+  balanceService: BalanceService;
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
@@ -58,6 +64,76 @@ export async function loadSearchHistoryForSelection(
     );
     return [];
   }
+}
+
+/**
+ * Loads wallet data (purchases + current balance + movement) only when this
+ * walk can actually evaluate a purchases/balance rule — same short-circuit
+ * shape as loadSearchHistoryForSelection. Three independent reads run in
+ * parallel; a failure in any one degrades that piece to "no data" (checker
+ * then fails closed) without blocking the other two or the rest of selection.
+ */
+export async function loadWalletDataForSelection(
+  params: SelectPromoParams,
+  promos: Promo[],
+  skip: string[],
+  deps: SelectPromoDeps,
+  logPrefix: 'select-promo' | 'select-promo-list',
+): Promise<{ purchases: PurchaseEntry[]; walletBalanceKopecks?: number; walletMovementKopecks?: number }> {
+  const empty = { purchases: [], walletBalanceKopecks: undefined, walletMovementKopecks: undefined };
+  if (!params.userId) return empty;
+
+  const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
+  const needsBalance = !skip.includes('balance') && promos.some(hasBalanceRule);
+  if (!needsPurchases && !needsBalance) return empty;
+
+  const purchaseLookbackDays = needsPurchases
+    ? Math.max(...promos.filter(hasPurchaseRule).map((p) => p.targeting.purchases!.lookbackDays ?? 30))
+    : 0;
+  const movementLookbackDays = needsBalance
+    ? promos
+        .filter((p) => hasBalanceRule(p) && p.targeting.balance!.movementLookbackDays !== undefined)
+        .reduce<number | undefined>((max, p) => {
+          const d = p.targeting.balance!.movementLookbackDays!;
+          return max === undefined ? d : Math.max(max, d);
+        }, undefined)
+    : undefined;
+  const movementSinceMs = movementLookbackDays !== undefined
+    ? Date.now() - movementLookbackDays * 24 * 60 * 60 * 1000
+    : undefined;
+  const needsCurrentBalance = needsBalance && promos.some(
+    (p) => hasBalanceRule(p) && (p.targeting.balance!.currentAbove !== undefined || p.targeting.balance!.currentBelow !== undefined),
+  );
+  const needsMovement = needsBalance && promos.some(
+    (p) => hasBalanceRule(p) && (p.targeting.balance!.movementAbove !== undefined || p.targeting.balance!.movementBelow !== undefined),
+  );
+
+  const [purchases, balances, movement] = await Promise.all([
+    needsPurchases
+      ? deps.purchaseLedgerService.getPurchases(params.userId, Date.now() - purchaseLookbackDays * 24 * 60 * 60 * 1000).catch((err) => {
+          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: purchase history unavailable`);
+          return [] as PurchaseEntry[];
+        })
+      : Promise.resolve([] as PurchaseEntry[]),
+    needsCurrentBalance
+      ? deps.balanceService.getBalances([params.userId]).catch((err) => {
+          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: wallet balance unavailable`);
+          return new Map<string, number>();
+        })
+      : Promise.resolve(new Map<string, number>()),
+    needsMovement
+      ? deps.purchaseLedgerService.getMovement(params.userId, movementSinceMs).catch((err) => {
+          deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: wallet movement unavailable`);
+          return undefined;
+        })
+      : Promise.resolve(undefined),
+  ]);
+
+  return {
+    purchases,
+    walletBalanceKopecks: balances.get(params.userId),
+    walletMovementKopecks: movement,
+  };
 }
 
 /**
@@ -123,6 +199,7 @@ export async function handleSelectPromo(
 
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
   const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo');
+  const wallet = await loadWalletDataForSelection(params, promos, skip, deps, 'select-promo');
 
   let promo: Promo | null;
   let trace: SelectionTrace | undefined;
@@ -140,6 +217,9 @@ export async function handleSelectPromo(
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,
+        purchases: wallet.purchases,
+        walletBalanceKopecks: wallet.walletBalanceKopecks,
+        walletMovementKopecks: wallet.walletMovementKopecks,
       },
       {
         skip,

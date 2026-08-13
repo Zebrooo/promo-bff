@@ -41,6 +41,8 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   impressionStore: fakeImpressionStore(),
   listingService: fakeListingService(),
   searchHistoryService: { getSearchHistory: async () => [] },
+  purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+  balanceService: { getBalances: async () => new Map() },
   ...over,
 });
 
