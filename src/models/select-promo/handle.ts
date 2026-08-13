@@ -70,8 +70,14 @@ export async function loadSearchHistoryForSelection(
  * Loads wallet data (purchases + current balance + movement) only when this
  * walk can actually evaluate a purchases/balance rule — same short-circuit
  * shape as loadSearchHistoryForSelection. Three independent reads run in
- * parallel; a failure in any one degrades that piece to "no data" (checker
- * then fails closed) without blocking the other two or the rest of selection.
+ * parallel; a failure in any one degrades that piece to an explicitly
+ * "unavailable" marker (undefined purchases, walletBalanceUnavailable: true,
+ * or an absent movement-window entry) rather than a value that looks like a
+ * genuine empty/zero result. The checkers then fail the WHOLE rule closed
+ * when data it needs is unavailable, instead of quietly defaulting to 0/[]
+ * — an outage must never let a targeting rule pass for a user whose real
+ * data is simply unknown. This does not block the other two reads or the
+ * rest of selection: each piece degrades independently.
  */
 export async function loadWalletDataForSelection(
   params: SelectPromoParams,
@@ -79,8 +85,18 @@ export async function loadWalletDataForSelection(
   skip: string[],
   deps: SelectPromoDeps,
   logPrefix: 'select-promo' | 'select-promo-list',
-): Promise<{ purchases: PurchaseEntry[]; walletBalanceKopecks?: number; walletMovementByWindow: Map<number | undefined, number> }> {
-  const empty = { purchases: [], walletBalanceKopecks: undefined, walletMovementByWindow: new Map<number | undefined, number>() };
+): Promise<{
+  purchases: PurchaseEntry[] | undefined;
+  walletBalanceKopecks?: number;
+  walletBalanceUnavailable?: boolean;
+  walletMovementByWindow: Map<number | undefined, number>;
+}> {
+  const empty = {
+    purchases: [] as PurchaseEntry[],
+    walletBalanceKopecks: undefined,
+    walletBalanceUnavailable: undefined,
+    walletMovementByWindow: new Map<number | undefined, number>(),
+  };
   if (!params.userId) return empty;
 
   const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
@@ -106,16 +122,19 @@ export async function loadWalletDataForSelection(
       )]
     : [];
 
+  let balanceFetchFailed = false;
+
   const [purchases, balances, movementEntries] = await Promise.all([
     needsPurchases
       ? deps.purchaseLedgerService.getPurchases(params.userId, Date.now() - purchaseLookbackDays * 24 * 60 * 60 * 1000).catch((err) => {
           deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: purchase history unavailable`);
-          return [] as PurchaseEntry[];
+          return undefined;
         })
       : Promise.resolve([] as PurchaseEntry[]),
     needsCurrentBalance
       ? deps.balanceService.getBalances([params.userId]).catch((err) => {
           deps.logger?.error({ error: err instanceof Error ? err.message : 'unknown error' }, `${logPrefix}: wallet balance unavailable`);
+          balanceFetchFailed = true;
           return new Map<string, number>();
         })
       : Promise.resolve(new Map<string, number>()),
@@ -142,6 +161,7 @@ export async function loadWalletDataForSelection(
   return {
     purchases,
     walletBalanceKopecks: balances.get(params.userId),
+    walletBalanceUnavailable: balanceFetchFailed ? true : undefined,
     walletMovementByWindow: new Map(movementEntries.filter((e): e is readonly [number | undefined, number] => e !== null)),
   };
 }
@@ -229,6 +249,7 @@ export async function handleSelectPromo(
         searchHistory,
         purchases: wallet.purchases,
         walletBalanceKopecks: wallet.walletBalanceKopecks,
+        walletBalanceUnavailable: wallet.walletBalanceUnavailable,
         walletMovementByWindow: wallet.walletMovementByWindow,
       },
       {

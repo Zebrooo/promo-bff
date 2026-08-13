@@ -41,9 +41,15 @@ export class PurchaseChecker extends Checker {
   // ПРОВАЛИТЬ правило (false), а не пройти как "не применимо" (skip == eligible).
   check(ctx: CheckContext): boolean {
     if (!ctx.isAuthorized) return false;
+    // ctx.purchases is only ever undefined here because the fetch failed — this
+    // checker only runs when hasPurchaseRule(ctx.promo) is true, which means the
+    // loader was asked for purchases; "not needed" never reaches check() (shouldSkip
+    // gates that). Fail the whole rule closed rather than silently treating an
+    // outage as "genuinely zero purchases".
+    if (ctx.purchases === undefined) return false;
     const rule = ctx.promo.targeting.purchases!;
     const lookbackDays = rule.lookbackDays ?? DEFAULT_LOOKBACK_DAYS;
-    const windowed = inWindow(ctx.purchases ?? [], ctx.now, lookbackDays);
+    const windowed = inWindow(ctx.purchases, ctx.now, lookbackDays);
     const filtered = rule.packTypes?.length
       ? windowed.filter((e) => rule.packTypes!.includes(e.pack))
       : windowed;

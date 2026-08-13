@@ -81,4 +81,9 @@ describe('PurchaseChecker', () => {
     expect(checker.check(context({ minCount: 1 }, [old]))).toBe(false); // > 30 дней от now
     expect(checker.check(context({ minCount: 1, lookbackDays: 60 }, [old]))).toBe(true);
   });
+
+  it('fails closed when the purchase fetch failed (ctx.purchases undefined), not treated as zero purchases', () => {
+    const ctx = context({ purchased: false }, []);
+    expect(checker.check({ ...ctx, purchases: undefined })).toBe(false); // NOT true, even though purchased:false would trivially pass on an empty array
+  });
 });

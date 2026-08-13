@@ -67,6 +67,8 @@ export interface SelectPromoContext {
   purchases?: PurchaseEntry[];
   /** Current wallet balance, preloaded once by the model handler. */
   walletBalanceKopecks?: number;
+  /** True only when the balance fetch itself failed (outage) — distinct from a genuinely absent wallet account, which is a legitimate 0. */
+  walletBalanceUnavailable?: boolean;
   /** Net wallet movement per requested window, preloaded once by the model handler. */
   walletMovementByWindow?: Map<number | undefined, number>;
 }
@@ -140,6 +142,7 @@ async function evaluateCandidate(
     searchHistory: ctx.searchHistory,
     purchases: ctx.purchases,
     walletBalanceKopecks: ctx.walletBalanceKopecks,
+    walletBalanceUnavailable: ctx.walletBalanceUnavailable,
     walletMovementByWindow: ctx.walletMovementByWindow,
   };
   const checks: CheckerTraceEntry[] = [];

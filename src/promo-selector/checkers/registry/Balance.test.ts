@@ -52,9 +52,28 @@ describe('BalanceChecker', () => {
     expect(checker.check(context({ currentBelow: 1 }))).toBe(true);
   });
 
-  it('treats a missing walletMovementByWindow entry as 0', () => {
+  it('fails closed (not "treats as 0") when the movement window is missing from the map — an unattempted/failed fetch, never a legitimate empty (regression: was fail-open before the outage fix)', () => {
     expect(checker.check(context({ movementAbove: 1 }))).toBe(false);
-    expect(checker.check(context({ movementBelow: 1 }))).toBe(true);
+    expect(checker.check(context({ movementBelow: 1 }))).toBe(false);
+  });
+
+  it('fails closed on the whole rule when movement data is unavailable, even if currentAbove would have passed', () => {
+    const rule = { movementBelow: 5000, currentAbove: 100000 };
+    // walletBalanceKopecks present and satisfies currentAbove; walletMovementByWindow
+    // has NO entry for this rule's window (undefined lookbackDays key) = fetch failed.
+    expect(
+      checker.check(context(rule, { walletBalanceKopecks: 150000, walletMovementByWindow: new Map() })),
+    ).toBe(false);
+  });
+
+  it('fails closed when the balance fetch itself failed (walletBalanceUnavailable), even with a stale balance value present', () => {
+    const ctx = context({ currentAbove: 100000 }, { walletBalanceKopecks: 150000 });
+    expect(checker.check({ ...ctx, walletBalanceUnavailable: true })).toBe(false);
+  });
+
+  it('does NOT fail closed on a genuinely absent wallet account (no fetch failure, just no row) — treats as 0', () => {
+    // walletBalanceKopecks undefined, walletBalanceUnavailable NOT set — legitimate "no account = 0".
+    expect(checker.check(context({ currentBelow: 100000 }))).toBe(true);
   });
 
   it('enforces movementAbove/movementBelow against the window keyed by the rule\'s own movementLookbackDays', () => {

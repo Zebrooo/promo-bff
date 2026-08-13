@@ -670,7 +670,7 @@ describe('loadWalletDataForSelection', () => {
     expect(result.walletBalanceKopecks).toBe(50000);
   });
 
-  it('fail-soft: a getPurchases rejection degrades purchases to [] without throwing and without blocking balance/movement', async () => {
+  it('fail-soft: a getPurchases rejection degrades purchases to undefined (unavailable, not a genuine empty) without throwing and without blocking balance/movement', async () => {
     const errors: { obj: unknown; msg?: string }[] = [];
     const logger = { info: () => {}, error: (obj: unknown, msg?: string) => errors.push({ obj, msg }) };
     const walletDeps = deps({
@@ -682,7 +682,7 @@ describe('loadWalletDataForSelection', () => {
       logger,
     });
     const result = await loadWalletDataForSelection({ userId: 'u1' }, [purchaseTargeted, balanceTargeted], [], walletDeps, 'select-promo');
-    expect(result.purchases).toEqual([]);
+    expect(result.purchases).toBeUndefined();
     expect(result.walletBalanceKopecks).toBe(20000);
     expect(result.walletMovementByWindow.get(undefined)).toBe(7000);
     expect(errors).toContainEqual({ obj: { error: 'ledger unavailable' }, msg: 'select-promo: purchase history unavailable' });
@@ -701,6 +701,22 @@ describe('loadWalletDataForSelection', () => {
     expect(result.purchases).toHaveLength(1);
     expect(result.walletMovementByWindow.get(undefined)).toBe(3000);
     expect(errors).toContainEqual({ obj: { error: 'balance unavailable' }, msg: 'select-promo: wallet balance unavailable' });
+  });
+
+  it('marks walletBalanceUnavailable: true only when getBalances actually threw (outage), distinct from a genuinely absent wallet account', async () => {
+    const failed = deps({
+      purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+      balanceService: { getBalances: async () => { throw new Error('balance unavailable'); } },
+    });
+    const failedResult = await loadWalletDataForSelection({ userId: 'u1' }, [balanceTargeted], [], failed, 'select-promo');
+    expect(failedResult.walletBalanceUnavailable).toBe(true);
+
+    const succeeded = deps({
+      purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
+      balanceService: { getBalances: async () => new Map() }, // succeeds, just no row for this user
+    });
+    const succeededResult = await loadWalletDataForSelection({ userId: 'u1' }, [balanceTargeted], [], succeeded, 'select-promo');
+    expect(succeededResult.walletBalanceUnavailable).toBeUndefined();
   });
 
   it('fail-soft: a getMovement rejection degrades only that window to absent without throwing and without blocking purchases/balance', async () => {

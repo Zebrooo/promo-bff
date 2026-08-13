@@ -31,6 +31,8 @@ export interface CheckContext {
   purchases?: PurchaseEntry[];
   /** Текущий остаток кошелька, kopecks. undefined = нет счёта/не загружали. */
   walletBalanceKopecks?: number;
+  /** True only when the balance fetch itself failed (outage) — distinct from a genuinely absent wallet account, which is a legitimate 0. */
+  walletBalanceUnavailable?: boolean;
   /** Net wallet movement per requested window. Key = the rule's `movementLookbackDays` (undefined key = all-time). */
   walletMovementByWindow?: Map<number | undefined, number>;
 }
