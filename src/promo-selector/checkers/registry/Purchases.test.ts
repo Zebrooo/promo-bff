@@ -26,7 +26,20 @@ function context(
 describe('PurchaseChecker', () => {
   it('skips when no rule is configured', () => {
     expect(checker.shouldSkip(makeCheckContext())).toBe('no purchase targeting');
-    expect(checker.shouldSkip(context({}))).toBe(false); // {} — валидный, но пустой объект всё ещё "задан"
+  });
+
+  it('skips for an empty object (regression: empty-object-not-treated-as-rule)', () => {
+    // {} previously counted as "a rule is configured" because hasPurchaseRule only checked
+    // `!== undefined`; an empty (or all-undefined-fields) object must mean "no rule".
+    expect(checker.shouldSkip(context({}))).toBe('no purchase targeting');
+  });
+
+  it('skips when only lookbackDays is set (modifier, not a criterion)', () => {
+    expect(checker.shouldSkip(context({ lookbackDays: 60 }))).toBe('no purchase targeting');
+  });
+
+  it('does not skip when purchased is explicitly false', () => {
+    expect(checker.shouldSkip(context({ purchased: false }))).toBe(false);
   });
 
   it('fails closed for an unauthorized viewer even with matching purchases', () => {

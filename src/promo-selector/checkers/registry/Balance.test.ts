@@ -24,7 +24,16 @@ function movementMap(movementLookbackDays: number | undefined, valueKopecks: num
 describe('BalanceChecker', () => {
   it('skips when no rule is configured', () => {
     expect(checker.shouldSkip(makeCheckContext())).toBe('no balance targeting');
-    expect(checker.shouldSkip(context({}))).toBe(false);
+  });
+
+  it('skips for an empty object (regression: empty-object-not-treated-as-rule)', () => {
+    // {} previously counted as "a rule is configured" because hasBalanceRule only checked
+    // `!== undefined`; an empty (or all-undefined-fields) object must mean "no rule".
+    expect(checker.shouldSkip(context({}))).toBe('no balance targeting');
+  });
+
+  it('skips when only movementLookbackDays is set (modifier, not a criterion)', () => {
+    expect(checker.shouldSkip(context({ movementLookbackDays: 14 }))).toBe('no balance targeting');
   });
 
   it('fails closed for an unauthorized viewer', () => {

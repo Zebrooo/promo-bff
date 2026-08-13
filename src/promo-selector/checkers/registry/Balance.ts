@@ -2,7 +2,14 @@ import { Checker, type CheckContext } from '../Checker';
 import type { Promo } from '../../types';
 
 export function hasBalanceRule(promo: Promo): boolean {
-  return promo.targeting.balance !== undefined;
+  const rule = promo.targeting.balance;
+  if (!rule) return false;
+  return (
+    rule.currentAbove !== undefined ||
+    rule.currentBelow !== undefined ||
+    rule.movementAbove !== undefined ||
+    rule.movementBelow !== undefined
+  );
 }
 
 /** Gates promos by the request viewer's wallet balance / recent movement. */

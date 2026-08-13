@@ -5,7 +5,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 30;
 
 export function hasPurchaseRule(promo: Promo): boolean {
-  return promo.targeting.purchases !== undefined;
+  const rule = promo.targeting.purchases;
+  if (!rule) return false;
+  return (
+    rule.purchased !== undefined ||
+    rule.minTotalKopecks !== undefined ||
+    rule.maxTotalKopecks !== undefined ||
+    rule.minCount !== undefined ||
+    rule.maxCount !== undefined ||
+    (rule.packTypes?.length ?? 0) > 0
+  );
 }
 
 function inWindow(entries: PurchaseEntry[], now: Date, lookbackDays: number): PurchaseEntry[] {
