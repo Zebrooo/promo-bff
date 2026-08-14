@@ -9,6 +9,7 @@ import { BalanceChecker } from './registry/Balance';
 import { DeviceChecker } from './registry/Device';
 import { FormatChecker } from './registry/Format';
 import { SellerChecker } from './registry/Seller';
+import { ListingsChecker } from './registry/Listings';
 import { LimitChecker, CooldownChecker } from './registry/Frequency';
 import { ChainChecker } from './registry/Chain';
 
@@ -29,6 +30,7 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new DeviceChecker(),
   new FormatChecker(),
   new SellerChecker(),
+  new ListingsChecker(),
   new LimitChecker(),
   new CooldownChecker(),
   new ChainChecker(),

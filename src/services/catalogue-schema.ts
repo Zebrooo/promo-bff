@@ -36,6 +36,14 @@ export const balanceTargetingSchema = z.object({
   movementLookbackDays: z.number().int().min(1).max(365).optional(),
 });
 
+export const listingsTargetingSchema = z.object({
+  categories: z.array(z.string().min(1)).optional(),
+  categoriesMatch: z.enum(['any', 'all']).optional(),
+  activeCategories: z.array(z.string().min(1)).optional(),
+  hasUnpromotedActive: z.boolean().optional(),
+  inactiveDays: z.number().int().nonnegative().optional(),
+});
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
@@ -50,6 +58,7 @@ export const promoSchema = z.object({
     search: searchTargetingSchema.optional(),
     purchases: purchasesTargetingSchema.optional(),
     balance: balanceTargetingSchema.optional(),
+    listings: listingsTargetingSchema.optional(),
   }),
   // Optional per-user cap. Legacy data used 0 = unlimited; coerce that to
   // undefined (the new "unlimited") so old catalogues still parse.
