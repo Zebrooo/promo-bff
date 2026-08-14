@@ -86,6 +86,36 @@ describe('promoSchema', () => {
     expect(() => parseSearch({ lookbackDays: 31 })).toThrow();
     expect(() => parseSearch({ lookbackDays: 1.5 })).toThrow();
   });
+
+  it('does not strip targeting.listings (regression: silently-dropped-field bug)', () => {
+    const promo = makePromo({
+      targeting: {
+        listings: {
+          categories: ['avto'],
+          categoriesMatch: 'all',
+          activeCategories: ['avto'],
+          hasUnpromotedActive: true,
+          inactiveDays: 14,
+        },
+      },
+    });
+    const result = promoSchema.safeParse(promo);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.targeting.listings).toEqual({
+        categories: ['avto'],
+        categoriesMatch: 'all',
+        activeCategories: ['avto'],
+        hasUnpromotedActive: true,
+        inactiveDays: 14,
+      });
+    }
+  });
+
+  it('rejects an out-of-range inactiveDays', () => {
+    const promo = makePromo({ targeting: { listings: { inactiveDays: -1 } } });
+    expect(promoSchema.safeParse(promo).success).toBe(false);
+  });
 });
 
 describe('purchases/balance targeting (regression: must not be stripped by z.object)', () => {

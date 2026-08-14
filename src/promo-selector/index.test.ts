@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { selectPromo, selectPromoList, WEB_CHECKERS, type SelectionTrace } from './index';
 import { __clearUserDataCache, type SupplierDeps } from './checkers/suppliers';
-import { makePromo } from '../test-utils';
+import { makePromo, makeListingStats } from '../test-utils';
 
 function makeDeps(over: Partial<{ counts: Record<string, number>; lastShownAt: Record<string, string> }> = {}): SupplierDeps {
   return {
@@ -11,7 +11,7 @@ function makeDeps(over: Partial<{ counts: Record<string, number>; lastShownAt: R
       getImpressions: async () => ({ counts: over.counts ?? {}, lastShownAt: over.lastShownAt ?? {} }),
       recordImpression: async () => {},
     },
-    listingService: { getListingStats: async () => ({ activeListings: 0 }) },
+    listingService: { getListingStats: async () => makeListingStats(0).listingStats },
   };
 }
 

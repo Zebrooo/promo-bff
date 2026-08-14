@@ -51,6 +51,19 @@ export interface PromoTargeting {
     /** Window for movement checks. Omitted = all-time (since account creation). */
     movementLookbackDays?: number;
   };
+  /** Own-listings gate: categories/active-categories/upsell/reactivation. Omitted/empty means no listings targeting. */
+  listings?: {
+    /** Ever listed (any status) in one of these category slugs. */
+    categories?: string[];
+    /** Whether categories/activeCategories require ANY or ALL to match. Defaults to `any`. */
+    categoriesMatch?: 'any' | 'all';
+    /** Has an ACTIVE listing in one of these category slugs. */
+    activeCategories?: string[];
+    /** Has an active listing without current promotion (upsell gate). */
+    hasUnpromotedActive?: boolean;
+    /** Minimum days since the user's most recent listing (any status). */
+    inactiveDays?: number;
+  };
 }
 
 /**
