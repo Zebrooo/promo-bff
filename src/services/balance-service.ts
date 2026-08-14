@@ -9,6 +9,15 @@
 import { config, type SupabaseConfig } from '../config';
 import { withTimeout } from '../util/with-timeout';
 
+// Same cap as purchase-ledger-service.ts's TIMEOUT_MS: the storefront's
+// select-promo walk runs this read inside a Promise.all alongside the ledger
+// reads (loadWalletDataForSelection), budgeted against an ~800ms selection
+// deadline — the general cfg.timeoutMs (2500ms default) would blow that
+// budget on a slow/hanging Supabase response. auction/feed-fill share this
+// same factory and table and have no documented looser budget, so the cap
+// applies uniformly rather than only to the select-promo call site.
+const TIMEOUT_MS = 300;
+
 export interface BalanceService {
   /** advertiserId -> balance_kopecks. Advertisers with no wallet row are absent. */
   getBalances(advertiserIds: string[]): Promise<Map<string, number>>;
@@ -32,6 +41,7 @@ export function createBalanceService(cfg: SupabaseConfig = config.supabase): Bal
   if (!url || !serviceRoleKey) {
     return { getBalances: async () => new Map() };
   }
+  const budget = Math.min(timeoutMs, TIMEOUT_MS);
   const table = `${url}/rest/v1/ledger_accounts`;
 
   async function getBalances(advertiserIds: string[]): Promise<Map<string, number>> {
@@ -51,6 +61,6 @@ export function createBalanceService(cfg: SupabaseConfig = config.supabase): Bal
   }
 
   return {
-    getBalances: (ids) => withTimeout(getBalances(ids), timeoutMs, 'balanceService.getBalances'),
+    getBalances: (ids) => withTimeout(getBalances(ids), budget, 'balanceService.getBalances'),
   };
 }
