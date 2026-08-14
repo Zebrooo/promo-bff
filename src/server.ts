@@ -167,7 +167,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   const auctionDeps: AuctionDeps = {
     campaignService: createCampaignService(),
-    balanceService: createBalanceService(),
+    // Same fix as the SelectPromoDeps instance above: balance-service.ts always
+    // reads abkhaz-auto Supabase's ledger_accounts (its own doc comment says so),
+    // never the promo Supabase — the two only coincide today because
+    // docker-compose pins PROMO_SUPABASE_URL to AA_SUPABASE_URL. Passing the bare
+    // default (config.supabase) would silently read the wrong instance the day
+    // that infra accident is undone.
+    balanceService: createBalanceService(config.aaSupabase),
     logger: app.log,
     ...opts.deps,
   };

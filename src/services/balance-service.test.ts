@@ -68,4 +68,25 @@ describe('createBalanceService.getBalances', () => {
     expect(typeof out.get('adv-2')).toBe('number');
     expect(out.get('adv-2')).toBe(0);
   });
+
+  // Mirrors purchase-ledger-service.ts's TIMEOUT_MS cap: this read runs inside
+  // loadWalletDataForSelection's Promise.all alongside the ledger reads, which
+  // are already capped at 300ms against the storefront's selection deadline. A
+  // hanging fetch must not be allowed to ride the general cfg.timeoutMs (2500ms
+  // default) — it has to time out at the same 300ms budget.
+  it('caps the timeout at 300ms even when cfg.timeoutMs is much higher', async () => {
+    const hang = () => new Promise<Response>(() => {}); // never resolves
+    vi.stubGlobal('fetch', vi.fn(hang));
+    await expect(
+      createBalanceService({ url: 'https://db.example', serviceRoleKey: 'k', timeoutMs: 2000 }).getBalances(['adv-1']),
+    ).rejects.toThrow(/timed out after 300ms/);
+  });
+
+  it('still honours a tighter cfg.timeoutMs when it is below 300ms (Math.min, not a floor)', async () => {
+    const hang = () => new Promise<Response>(() => {}); // never resolves
+    vi.stubGlobal('fetch', vi.fn(hang));
+    await expect(
+      createBalanceService({ url: 'https://db.example', serviceRoleKey: 'k', timeoutMs: 50 }).getBalances(['adv-1']),
+    ).rejects.toThrow(/timed out after 50ms/);
+  });
 });
