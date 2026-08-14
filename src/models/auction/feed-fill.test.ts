@@ -87,7 +87,7 @@ describe('handleFeedFill', () => {
   });
 
   it('excludes malformed creatives before allocating', async () => {
-    const broken = { ...cand(1, 'A', 9000), creative: { format: 'banner' } }; // no title → campaignToAd null
+    const broken = { ...cand(1, 'A', 9000), creative: { format: 'banner' } };
     const res = await handleFeedFill(
       { count: 4, format: 'block' },
       makeDeps([broken, cand(2, 'A', 1000)], { A: 100_000 }),

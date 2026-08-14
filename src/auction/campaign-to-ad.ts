@@ -4,8 +4,9 @@
  * existing impression report ties an impression back to its campaign for SP4
  * charging — no new response field needed. The stored creative was validated at
  * SP2 write-time; here we defensively read only known fields, coerce types, and
- * return null when the creative is malformed (missing/unknown format or blank
- * title) so the caller can exclude it before ranking.
+ * return null when the creative is malformed. Self-serve image banners may
+ * omit title because all visible copy can be baked into the uploaded image;
+ * legacy text-led formats still require one.
  */
 import type { CampaignCandidate } from '../services/campaign-service';
 import type { Advertisement } from '../models/select-promo/types';
@@ -128,21 +129,35 @@ export function campaignToAd(c: CampaignCandidate, target?: AdTargetSize): Adver
   const format = r.format;
   if (typeof format !== 'string' || !(FORMATS as readonly string[]).includes(format)) return null;
   const title = str(r.title);
-  if (!title) return null;
+  if (!title && format !== 'banner') return null;
 
   // Tooltip creatives must carry the host anchor id (host marks the element
   // data-promo-anchor="<id>"); without it the renderer cannot position the bubble.
   const anchor = str(r.anchor);
   if (format === 'tooltip' && !anchor) return null;
 
-  const ad: Advertisement = { id: `campaign:${c.id}`, format: format as PromoFormat, title };
+  const image = format === 'banner' && c.bannerFormat === 'horizontal'
+    ? imageProjectionForTarget(r, target)
+    : primaryImageProjection(r);
+  const action = typeof r.action === 'object' && r.action !== null
+    ? r.action as Record<string, unknown>
+    : undefined;
+  const actionHref = action ? str(action.href) : undefined;
+
+  // A titleless self-serve banner is renderable only when its required visual
+  // and destination survived defensive parsing. This keeps malformed legacy
+  // rows from entering ranking/billing merely because title became optional.
+  if (format === 'banner' && !title && (!image.imageUrl || !actionHref)) return null;
+
+  const ad: Advertisement = {
+    id: `campaign:${c.id}`,
+    format: format as PromoFormat,
+    title: title ?? '',
+  };
   if (anchor !== undefined) ad.anchor = anchor;
 
   const description = str(r.description);
   if (description !== undefined) ad.description = description;
-  const image = format === 'banner' && c.bannerFormat === 'horizontal'
-    ? imageProjectionForTarget(r, target)
-    : primaryImageProjection(r);
   if (image.imageUrl !== undefined) ad.imageUrl = image.imageUrl;
   if (image.imageFocalPoint !== undefined) ad.imageFocalPoint = image.imageFocalPoint;
   const backgroundColor = str(r.backgroundColor);
@@ -153,17 +168,13 @@ export function campaignToAd(c: CampaignCandidate, target?: AdTargetSize): Adver
   if (backgroundImage !== undefined) ad.backgroundImage = backgroundImage;
   if (typeof r.dismissible === 'boolean') ad.dismissible = r.dismissible;
 
-  if (typeof r.action === 'object' && r.action !== null) {
-    const a = r.action as Record<string, unknown>;
-    const href = str(a.href);
-    if (href !== undefined) {
-      const label = str(a.label);
-      // Whitelist for CTA pill position — anything else is dropped.
-      const POSITIONS = ['tl', 'tr', 'bl', 'br'] as const;
-      const rawPos = str(a.position);
-      const position = rawPos && (POSITIONS as readonly string[]).includes(rawPos) ? rawPos : undefined;
-      ad.action = { href, ...(label !== undefined ? { label } : {}), ...(position !== undefined ? { position } : {}) };
-    }
+  if (actionHref !== undefined && action !== undefined) {
+    const label = str(action.label);
+    // Whitelist for CTA pill position — anything else is dropped.
+    const POSITIONS = ['tl', 'tr', 'bl', 'br'] as const;
+    const rawPos = str(action.position);
+    const position = rawPos && (POSITIONS as readonly string[]).includes(rawPos) ? rawPos : undefined;
+    ad.action = { href: actionHref, ...(label !== undefined ? { label } : {}), ...(position !== undefined ? { position } : {}) };
   }
 
   return ad;

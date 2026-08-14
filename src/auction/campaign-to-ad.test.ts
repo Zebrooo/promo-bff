@@ -181,7 +181,30 @@ describe('campaignToAd', () => {
     expect(campaignToAd(candidate, { width: 580, height: 120 })?.imageUrl).toBe('https://x/legacy.png');
   });
 
-  it('returns null when title is missing or blank', () => {
+  it('serves a self-serve banner with an omitted or blank title', () => {
+    const creative = {
+      format: 'banner',
+      imageUrl: 'https://x/banner.png',
+      action: { href: 'https://shop' },
+    };
+
+    expect(campaignToAd(cand(creative))).toEqual({
+      id: 'campaign:42',
+      format: 'banner',
+      title: '',
+      imageUrl: 'https://x/banner.png',
+      action: { href: 'https://shop' },
+    });
+    expect(campaignToAd(cand({ ...creative, title: '   ' }))?.title).toBe('');
+  });
+
+  it('rejects a titleless banner without its required image or destination', () => {
+    expect(campaignToAd(cand({ format: 'banner' }))).toBeNull();
+    expect(campaignToAd(cand({ format: 'banner', imageUrl: 'https://x/banner.png' }))).toBeNull();
+    expect(campaignToAd(cand({ format: 'banner', action: { href: 'https://shop' } }))).toBeNull();
+  });
+
+  it('still returns null when a legacy creative title is missing or blank', () => {
     expect(campaignToAd(cand({ format: 'popup' }))).toBeNull();
     expect(campaignToAd(cand({ format: 'popup', title: '   ' }))).toBeNull();
   });
