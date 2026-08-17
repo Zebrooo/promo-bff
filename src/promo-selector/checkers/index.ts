@@ -7,6 +7,7 @@ import { SearchChecker } from './registry/Search';
 import { PurchaseChecker } from './registry/Purchases';
 import { BalanceChecker } from './registry/Balance';
 import { DeviceChecker } from './registry/Device';
+import { EnvChecker } from './registry/Env';
 import { FormatChecker } from './registry/Format';
 import { SellerChecker } from './registry/Seller';
 import { ListingsChecker } from './registry/Listings';
@@ -28,6 +29,7 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new PurchaseChecker(),
   new BalanceChecker(),
   new DeviceChecker(),
+  new EnvChecker(),
   new FormatChecker(),
   new SellerChecker(),
   new ListingsChecker(),

@@ -236,3 +236,41 @@ describe('selectPromoList', () => {
     expect(traces[0].candidates.map((c) => c.promoId)).toEqual(['a', 'blocked', 'c']);
   });
 });
+
+describe('selectPromo env targeting', () => {
+  it("checker order: 'env' стоит сразу после 'device' (Date → … → Device → Env → Format → …)", () => {
+    expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
+      'date', 'targeting', 'audience', 'context', 'search', 'purchases', 'balance',
+      'device', 'env', 'format', 'seller', 'listings', 'limit', 'cooldown', 'chain',
+    ]);
+  });
+
+  it('fail-closed: env-таргетированное промо без сигнала падает, очередь идёт дальше', async () => {
+    __clearUserDataCache();
+    const promos = [
+      makePromo({ id: 'tg-only', targeting: { environments: ['telegram'] } }),
+      makePromo({ id: 'fallback' }),
+    ];
+    const result = await selectPromo(promos, ctx, { deps: makeDeps() });
+    expect(result?.id).toBe('fallback');
+  });
+
+  it('совпавший сигнал проходит; несовпавший по любой оси — AND-fail', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'p', targeting: { os: ['ios'], environments: ['telegram'] } })];
+    const hit = await selectPromo(promos, { ...ctx, env: { os: 'ios', runtime: 'telegram' } }, { deps: makeDeps() });
+    expect(hit?.id).toBe('p');
+    __clearUserDataCache();
+    const miss = await selectPromo(promos, { ...ctx, env: { os: 'ios', runtime: 'browser' } }, { deps: makeDeps() });
+    expect(miss).toBeNull();
+  });
+
+  it('промо без env-правил не затронуто: в трейсе skip с причиной', async () => {
+    __clearUserDataCache();
+    const traces: SelectionTrace[] = [];
+    await selectPromo([makePromo({ id: 'a' })], ctx, { deps: makeDeps(), onTrace: (t) => traces.push(t) });
+    expect(traces[0].candidates[0].checks.find((c) => c.checker === 'env')).toEqual({
+      checker: 'env', outcome: 'skip', reason: 'no env targeting rules',
+    });
+  });
+});
