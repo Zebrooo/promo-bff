@@ -13,6 +13,11 @@ export type DeviceBrand = 'iphone' | 'android-flagship' | 'android-other';
  * из UA и кук (aa_app/aa_env). Сырой UA в BFF не передаётся (приватность, спека §6).
  * runtime поименован так (а не environment), чтобы не путать с массивом правил
  * targeting.environments.
+ *
+ * ⚠️ Сигнал НЕДОВЕРЕННЫЙ: куки/UA полностью подконтрольны клиенту
+ * (document.cookie='aa_env=telegram' — и посетитель «в Telegram»). Годится
+ * только для маркетингового таргетинга показов; НЕ строить на нём выдачу
+ * наград, бонусов и любых бюджетно-гарантированных механик.
  */
 export interface PromoEnvSignal {
   os?: PromoOs;
