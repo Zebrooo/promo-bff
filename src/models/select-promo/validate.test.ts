@@ -259,4 +259,50 @@ describe('validateParams', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.params.excludeIds).toEqual([]);
   });
+  it('accepts a valid env object and passes only known keys through', () => {
+    const result = validateParams({ userId: 'u1', env: { os: 'ios', runtime: 'telegram', brand: 'iphone', junk: 'x' } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.env).toEqual({ os: 'ios', runtime: 'telegram', brand: 'iphone' });
+  });
+
+  it('accepts a partial env (только runtime)', () => {
+    const result = validateParams({ userId: 'u1', env: { runtime: 'browser' } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.env).toEqual({ runtime: 'browser' });
+  });
+
+  it('omits env when absent or carrying no known keys (back-compat)', () => {
+    const absent = validateParams({ userId: 'u1' });
+    expect(absent.ok).toBe(true);
+    if (absent.ok) expect(absent.params.env).toBeUndefined();
+    const junkOnly = validateParams({ userId: 'u1', env: { junk: 1 } });
+    expect(junkOnly.ok).toBe(true);
+    if (junkOnly.ok) expect(junkOnly.params.env).toBeUndefined();
+  });
+
+  it('rejects env that is not an object', () => {
+    const result = validateParams({ userId: 'u1', env: 'ios' });
+    expect(result).toEqual({ ok: false, error: 'params.env must be an object' });
+  });
+
+  it('rejects env.os outside the enum', () => {
+    const result = validateParams({ userId: 'u1', env: { os: 'windows' } });
+    expect(result).toEqual({ ok: false, error: "params.env.os must be 'ios' or 'android'" });
+  });
+
+  it('rejects env.runtime outside the enum', () => {
+    const result = validateParams({ userId: 'u1', env: { runtime: 'webview' } });
+    expect(result).toEqual({ ok: false, error: "params.env.runtime must be 'browser', 'telegram', 'pwa' or 'app'" });
+  });
+
+  it('rejects env.brand outside the enum', () => {
+    const result = validateParams({ userId: 'u1', env: { brand: 'nokia' } });
+    expect(result).toEqual({ ok: false, error: "params.env.brand must be 'iphone', 'android-flagship' or 'android-other'" });
+  });
+
+  it("accepts skipCheckers ['env'] — allowlist расширился автоматически", () => {
+    const result = validateParams({ userId: 'u1', skipCheckers: ['env'] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.skipCheckers).toEqual(['env']);
+  });
 });

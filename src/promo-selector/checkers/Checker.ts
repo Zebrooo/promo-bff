@@ -1,4 +1,4 @@
-import type { Promo, SubscriptionLevel } from '../types';
+import type { Promo, PromoEnvSignal, SubscriptionLevel } from '../types';
 
 /** Stable identity source, independent from current login state. */
 export type IdentityKind = 'account' | 'anonymous';
@@ -16,6 +16,9 @@ export interface CheckContext {
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
   device?: 'desktop' | 'touch' | 'app';
+  /** Env-сигнал (ОС/среда/класс устройства), вычисленный сайтом. Undefined = сигнала нет:
+   *  промо с env-правилами тогда фейлится (fail-closed в EnvChecker), без правил — не затронуто. */
+  env?: PromoEnvSignal;
   /**
    * Acceptable creative formats for the requesting surface (e.g. ['topline'] for
    * the top banner, ['popup','fullscreen','inline','divkit'] for the overlay).

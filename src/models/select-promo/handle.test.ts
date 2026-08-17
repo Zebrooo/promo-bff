@@ -815,4 +815,29 @@ describe('loadWalletDataForSelection', () => {
     expect(result.walletMovementByWindow.get(30)).toBe(90000);
     expect(result.walletMovementByWindow.has(undefined)).toBe(false);
   });
+  it('env-таргетированное промо фильтруется без сигнала и проходит с ним', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ targeting: { os: ['ios'] } })], persist: false }),
+    });
+    const miss = await handleSelectPromo({ userId: 'env-miss' }, deps({ configService }));
+    expect(miss).toEqual({ status: 'skipped', reason: 'no_promo' });
+    const hit = await handleSelectPromo({ userId: 'env-hit', env: { os: 'ios' } }, deps({ configService }));
+    expect(hit).toMatchObject({ status: 'ok', data: { id: 'promo-1' } });
+  });
+
+  it('env доезжает до строки selection-trace', async () => {
+    const recorded: unknown[] = [];
+    const selectionTrace = {
+      record: (input: unknown) => recorded.push(input),
+      flush: async () => {}, start: () => {}, stop: async () => {},
+    };
+    await handleSelectPromo(
+      { userId: 'env-trace', queue: 'home', env: { os: 'android', runtime: 'app' } },
+      deps({ selectionTrace }),
+    );
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      userId: 'env-trace', queue: 'home', env: { os: 'android', runtime: 'app' },
+    });
+  });
 });

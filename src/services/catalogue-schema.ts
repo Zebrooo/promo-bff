@@ -6,6 +6,9 @@ export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
 export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
+export const promoOsSchema = z.enum(['ios', 'android']);
+export const promoEnvironmentSchema = z.enum(['browser', 'telegram', 'pwa', 'app']);
+export const deviceBrandSchema = z.enum(['iphone', 'android-flagship', 'android-other']);
 
 export const searchTargetingSchema = z.object({
   terms: z.array(
@@ -55,6 +58,9 @@ export const promoSchema = z.object({
     maxAge: z.number().int().nonnegative().optional(),
     regions: z.array(z.string()).optional(),
     subscriptionLevels: z.array(subscriptionLevelSchema).optional(),
+    os: z.array(promoOsSchema).optional(),
+    environments: z.array(promoEnvironmentSchema).optional(),
+    deviceBrands: z.array(deviceBrandSchema).optional(),
     search: searchTargetingSchema.optional(),
     purchases: purchasesTargetingSchema.optional(),
     balance: balanceTargetingSchema.optional(),

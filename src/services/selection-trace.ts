@@ -48,6 +48,8 @@ export interface SelectionTraceInput {
   formats?: string[];
   /** Session-seen ids the surface asked to drop before the checkers ran. */
   excludeIds?: string[];
+  /** Env-сигнал (enum'ы os/runtime/brand), который прислала поверхность; undefined = не передан. */
+  env?: { os?: string; runtime?: string; brand?: string };
   trace: SelectionTrace;
 }
 
@@ -79,6 +81,7 @@ interface TraceRow {
   category: string | null;
   formats: string[];
   exclude_ids: string[];
+  env: { os?: string; runtime?: string; brand?: string } | null;
   selected_promo_id: string | null;
   outcome: 'selected' | 'no_promo';
   /** trace.candidates verbatim: [{ promoId, checks:[{checker,outcome,reason}] }]. */
@@ -116,6 +119,7 @@ export function createSelectionTraceService(opts: SelectionTraceOptions = {}): S
       category: input.category ?? null,
       formats: input.formats ?? [],
       exclude_ids: input.excludeIds ?? [],
+      env: input.env ?? null,
       selected_promo_id: input.trace.selectedPromoId,
       outcome: input.trace.selectedPromoId ? 'selected' : 'no_promo',
       candidates: input.trace.candidates,

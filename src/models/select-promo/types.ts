@@ -1,6 +1,6 @@
 /** Public request/response types for the select-promo model. */
 
-import type { Promo } from '../../promo-selector/types';
+import type { Promo, PromoEnvSignal } from '../../promo-selector/types';
 import type { IdentityKind } from '../../promo-selector/checkers/Checker';
 export type { IdentityKind } from '../../promo-selector/checkers/Checker';
 
@@ -49,6 +49,12 @@ export interface SelectPromoParams {
    * gating then stays client-side in the renderer).
    */
   device?: 'desktop' | 'touch' | 'app';
+  /**
+   * Env-сигнал среды исполнения (enum'ы, вычисленные сервером сайта; сырого UA
+   * здесь нет — приватность). Omitted = сигнала нет: промо с env-правилами
+   * fail-closed, остальные не затронуты (back-compat).
+   */
+  env?: PromoEnvSignal;
   /**
    * Promo ids to exclude from selection (dropped BEFORE the checkers run).
    * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past

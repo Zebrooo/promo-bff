@@ -1,5 +1,6 @@
 import { WEB_CHECKERS } from '../../promo-selector/checkers';
 import type { SelectPromoParams } from './types';
+import type { PromoEnvSignal } from '../../promo-selector/types';
 
 /**
  * Names a consumer may pass in skipCheckers — derived from the registered
@@ -11,6 +12,11 @@ const KNOWN_CHECKER_NAMES = WEB_CHECKERS.map((c) => c.name);
 
 /** Bounds for params.excludeIds: a session-seen list, not a bulk filter. */
 const MAX_EXCLUDE_IDS = 50;
+
+/** Enum-значения params.env — зеркала PromoEnvSignal (см. promo-selector/types). */
+const PROMO_OS_VALUES: readonly string[] = ['ios', 'android'];
+const PROMO_ENVIRONMENT_VALUES: readonly string[] = ['browser', 'telegram', 'pwa', 'app'];
+const DEVICE_BRAND_VALUES: readonly string[] = ['iphone', 'android-flagship', 'android-other'];
 const MAX_EXCLUDE_ID_LENGTH = 64;
 const MAX_VIEWER_KEY_LENGTH = 128;
 
@@ -147,6 +153,29 @@ export function validateParams(params: unknown, opts: ValidationOptions = {}): V
       return { ok: false, error: "params.device must be 'desktop', 'touch' or 'app'" };
     }
     result.device = p.device;
+  }
+
+  if (p.env !== undefined) {
+    if (typeof p.env !== 'object' || p.env === null || Array.isArray(p.env)) {
+      return { ok: false, error: 'params.env must be an object' };
+    }
+    const e = p.env as Record<string, unknown>;
+    if (e.os !== undefined && (typeof e.os !== 'string' || !PROMO_OS_VALUES.includes(e.os))) {
+      return { ok: false, error: "params.env.os must be 'ios' or 'android'" };
+    }
+    if (e.runtime !== undefined && (typeof e.runtime !== 'string' || !PROMO_ENVIRONMENT_VALUES.includes(e.runtime))) {
+      return { ok: false, error: "params.env.runtime must be 'browser', 'telegram', 'pwa' or 'app'" };
+    }
+    if (e.brand !== undefined && (typeof e.brand !== 'string' || !DEVICE_BRAND_VALUES.includes(e.brand))) {
+      return { ok: false, error: "params.env.brand must be 'iphone', 'android-flagship' or 'android-other'" };
+    }
+    // Канонический выход: только известные ключи (мусор дальше валидатора не идёт).
+    const env: PromoEnvSignal = {
+      ...(e.os !== undefined ? { os: e.os as PromoEnvSignal['os'] } : {}),
+      ...(e.runtime !== undefined ? { runtime: e.runtime as PromoEnvSignal['runtime'] } : {}),
+      ...(e.brand !== undefined ? { brand: e.brand as PromoEnvSignal['brand'] } : {}),
+    };
+    if (Object.keys(env).length > 0) result.env = env;
   }
 
   if (userObj !== null) {

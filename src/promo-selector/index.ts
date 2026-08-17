@@ -1,4 +1,4 @@
-import type { Promo } from './types';
+import type { Promo, PromoEnvSignal } from './types';
 import type { IdentityKind } from './checkers/Checker';
 import {
   Checker,
@@ -57,6 +57,8 @@ export interface SelectPromoContext {
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
   device?: 'desktop' | 'touch' | 'app';
+  /** Env-сигнал (ОС/среда/класс устройства); undefined = сигнала нет (EnvChecker fail-closed). */
+  env?: PromoEnvSignal;
   /** Formats the requesting surface accepts; gates promos by format. Undefined/empty = no filter. */
   formats?: string[];
   /** Promo ids to drop from the queue BEFORE the checkers run. Undefined/empty = no exclusion. */
@@ -138,6 +140,7 @@ async function evaluateCandidate(
     section: ctx.section,
     category: ctx.category,
     device: ctx.device,
+    env: ctx.env,
     formats: ctx.formats,
     searchHistory: ctx.searchHistory,
     purchases: ctx.purchases,
