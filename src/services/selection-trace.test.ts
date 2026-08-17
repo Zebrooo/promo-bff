@@ -13,6 +13,7 @@ interface SentRow {
   category: string | null;
   formats: string[];
   exclude_ids: string[];
+  env: { os?: string; runtime?: string; brand?: string } | null;
   selected_promo_id: string | null;
   outcome: string;
   candidates: SelectionTrace['candidates'];
@@ -71,6 +72,7 @@ describe('selection-trace service', () => {
       category: undefined,
       formats: ['custom', 'tooltip'],
       excludeIds: ['cab-onb-1-where'],
+      env: { os: 'ios', runtime: 'telegram', brand: 'iphone' },
       trace: makeTrace('cabinet-onboarding-intro'),
     });
     await svc.flush();
@@ -92,6 +94,7 @@ describe('selection-trace service', () => {
       category: null,
       formats: ['custom', 'tooltip'],
       exclude_ids: ['cab-onb-1-where'],
+      env: { os: 'ios', runtime: 'telegram', brand: 'iphone' },
       selected_promo_id: 'cabinet-onboarding-intro',
       outcome: 'selected',
     });
@@ -112,6 +115,7 @@ describe('selection-trace service', () => {
     expect(rows[0].device).toBeNull();
     expect(rows[0].formats).toEqual([]);
     expect(rows[0].exclude_ids).toEqual([]);
+    expect(rows[0].env).toBeNull();
   });
 
   it('batches many records into a single insert', async () => {

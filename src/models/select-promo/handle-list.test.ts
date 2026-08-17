@@ -165,4 +165,20 @@ describe('handleSelectPromoList', () => {
     expect(result.status).toBe('ok');
     if (result.status === 'ok') expect(result.steps.map((step) => step.id)).toEqual(['generic']);
   });
+  it('env фильтрует шаги списка так же, как одиночный select-promo', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [makePromo({ id: 'any' }), makePromo({ id: 'tg', targeting: { environments: ['telegram'] } })],
+        persist: false,
+      }),
+    });
+    const noSignal = await handleSelectPromoList({ userId: 'env-l1' }, deps({ configService }));
+    expect(noSignal.status).toBe('ok');
+    if (noSignal.status === 'ok') expect(noSignal.steps.map((s) => s.id)).toEqual(['any']);
+    const inTelegram = await handleSelectPromoList(
+      { userId: 'env-l2', env: { runtime: 'telegram' } }, deps({ configService }),
+    );
+    expect(inTelegram.status).toBe('ok');
+    if (inTelegram.status === 'ok') expect(inTelegram.steps.map((s) => s.id)).toEqual(['any', 'tg']);
+  });
 });
