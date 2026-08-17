@@ -362,3 +362,35 @@ describe('promoFormatSchema ↔ PromoFormat enum sync', () => {
     expect([...promoFormatSchema.options].sort()).toEqual([...queueFormats].sort());
   });
 });
+
+describe('promoSchema — env-таргетинг (os/environments/deviceBrands)', () => {
+  const baseEnvPromo = {
+    id: 'env-p', name: 'Env', startsAt: '2024-01-01T00:00:00.000Z', endsAt: '2024-12-31T00:00:00.000Z',
+    targeting: {}, cooldownHours: 0, format: 'inline', title: 'T',
+  };
+
+  it('парсит промо с тремя новыми полями и round-trip’ит значения', () => {
+    const parsed = promoSchema.parse({
+      ...baseEnvPromo,
+      targeting: { os: ['ios'], environments: ['telegram', 'pwa'], deviceBrands: ['iphone', 'android-flagship'] },
+    });
+    expect(parsed.targeting).toEqual({
+      os: ['ios'], environments: ['telegram', 'pwa'], deviceBrands: ['iphone', 'android-flagship'],
+    });
+  });
+
+  it('промо без новых полей валидно (бит-в-бит старое поведение)', () => {
+    const parsed = promoSchema.parse(baseEnvPromo);
+    expect(parsed.targeting.os).toBeUndefined();
+    expect(parsed.targeting.environments).toBeUndefined();
+    expect(parsed.targeting.deviceBrands).toBeUndefined();
+  });
+
+  it('опечатка в enum отбрасывает только этот промо (parsePoolLeniently)', () => {
+    const broken = { ...baseEnvPromo, id: 'broken', targeting: { os: ['windows'] } };
+    const { promos, rejected } = parsePoolLeniently([broken, baseEnvPromo]);
+    expect(promos.map((p) => p.id)).toEqual(['env-p']);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].promoId).toBe('broken');
+  });
+});

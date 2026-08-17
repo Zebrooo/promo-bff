@@ -4,6 +4,22 @@ export type SubscriptionLevel = 'none' | 'plus' | 'premium';
 
 export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep' | 'custom';
 
+export type PromoOs = 'ios' | 'android';
+export type PromoEnvironment = 'browser' | 'telegram' | 'pwa' | 'app';
+export type DeviceBrand = 'iphone' | 'android-flagship' | 'android-other';
+
+/**
+ * Env-сигнал запроса: enum-классы среды исполнения, вычисленные СЕРВЕРОМ САЙТА
+ * из UA и кук (aa_app/aa_env). Сырой UA в BFF не передаётся (приватность, спека §6).
+ * runtime поименован так (а не environment), чтобы не путать с массивом правил
+ * targeting.environments.
+ */
+export interface PromoEnvSignal {
+  os?: PromoOs;
+  runtime?: PromoEnvironment;
+  brand?: DeviceBrand;
+}
+
 export interface ImageFocalPoint {
   /** Horizontal coordinate in basis points: 0 = left, 10_000 = right. */
   xBp: number;
@@ -18,6 +34,12 @@ export interface PromoTargeting {
   regions?: string[];
   /** Allowed subscription levels; empty/omitted means "any level". */
   subscriptionLevels?: SubscriptionLevel[];
+  /** Allowed OS classes; empty/omitted = any. Desktop carries no OS class → fail-closed. */
+  os?: PromoOs[];
+  /** Allowed execution environments; empty/omitted = any. */
+  environments?: PromoEnvironment[];
+  /** Allowed device-brand classes (платёжеспособность-прокси по UA); empty/omitted = any. */
+  deviceBrands?: DeviceBrand[];
   /** Search-history gate. Omitted/empty means no search targeting. */
   search?: {
     /** Normalized phrases to find in past search queries. */
