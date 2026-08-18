@@ -39,7 +39,10 @@ export function makeSuppliers(userData: Partial<UserData> = {}): { userData: Use
   };
 }
 
-export function makeListingStats(activeListings = 0): { listingStats: ListingStats } {
+export function makeListingStats(
+  activeListings = 0,
+  extra: Partial<ListingStats> = {},
+): { listingStats: ListingStats } {
   return {
     listingStats: {
       activeListings,
@@ -47,6 +50,7 @@ export function makeListingStats(activeListings = 0): { listingStats: ListingSta
       activeCategories: [],
       hasUnpromotedActive: false,
       daysSinceLastListing: undefined,
+      ...extra,
     },
   };
 }

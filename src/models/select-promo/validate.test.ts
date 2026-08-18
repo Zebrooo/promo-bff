@@ -379,3 +379,28 @@ describe('params.visit (visit-profile, WS-4)', () => {
     expect(validateParams({ userId: 'u1', skipCheckers: ['visitor', 'source'] }).ok).toBe(true);
   });
 });
+
+describe('params.sessionViews (behavior targeting, wave B)', () => {
+  it('accepts a valid integer and forwards it', () => {
+    const r = validateParams({ userId: 'u1', sessionViews: 5 });
+    expect(r).toEqual({ ok: true, params: { userId: 'u1', sessionViews: 5 } });
+    expect(validateParams({ userId: 'u1', sessionViews: 0 }).ok).toBe(true);
+    expect(validateParams({ userId: 'u1', sessionViews: 10_000 }).ok).toBe(true);
+  });
+
+  it('omitting sessionViews is fine (back-compat)', () => {
+    const r = validateParams({ userId: 'u1' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.sessionViews).toBeUndefined();
+  });
+
+  it('rejects non-integer / negative / oversized / non-number sessionViews', () => {
+    for (const bad of ['5', 1.5, -1, 10_001, null, {}, []]) {
+      expect(validateParams({ userId: 'u1', sessionViews: bad }).ok).toBe(false);
+    }
+  });
+
+  it("skipCheckers allowlist auto-includes 'interest', 'hot-buyer', 'engagement' and 'lifecycle'", () => {
+    expect(validateParams({ userId: 'u1', skipCheckers: ['interest', 'hot-buyer', 'engagement', 'lifecycle'] }).ok).toBe(true);
+  });
+});

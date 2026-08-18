@@ -42,6 +42,21 @@ export const balanceTargetingSchema = z.object({
   movementLookbackDays: z.number().int().min(1).max(365).optional(),
 });
 
+/** Поведенческий гейт (interest / hotBuyer / minSessionViews). Зеркалится
+ *  кабинетом (behaviorTargetingSchema в promo-cabinet/src/lib/schema.ts). */
+export const behaviorTargetingSchema = z.object({
+  interest: z.object({
+    categories: z.array(z.string().trim().min(1).max(64)).min(1).max(20).optional(),
+    /** 1..14: потолок = окно RPC promo_viewer_behavior. Дефолт чекера 7. */
+    lookbackDays: z.number().int().min(1).max(14).optional(),
+  }).optional(),
+  hotBuyer: z.object({
+    /** Разных объявлений за 7 дней (окно фиксировано в RPC). Дефолт чекера 2. */
+    minPhoneViews: z.number().int().min(1).max(50).optional(),
+  }).optional(),
+  minSessionViews: z.number().int().min(1).max(100).optional(),
+});
+
 export const listingsTargetingSchema = z.object({
   categories: z.array(z.string().min(1)).optional(),
   categoriesMatch: z.enum(['any', 'all']).optional(),
@@ -87,6 +102,7 @@ export const promoSchema = z.object({
     search: searchTargetingSchema.optional(),
     purchases: purchasesTargetingSchema.optional(),
     balance: balanceTargetingSchema.optional(),
+    behavior: behaviorTargetingSchema.optional(),
     listings: listingsTargetingSchema.optional(),
   }),
   // Optional per-user cap. Legacy data used 0 = unlimited; coerce that to
@@ -146,6 +162,22 @@ export const promoSchema = z.object({
   categories: z.array(z.string().min(1)).optional(),
   audience: audienceSchema.optional(),
   sellerStatus: z.enum(['seller', 'buyer']).optional(),
+  /** Таргетинг по стадии жизненного цикла собственных объявлений зрителя
+   *  (LifecycleChecker). Server-only поле отбора: клиенту не отдаётся
+   *  (stripToAdvertisement). Зеркалится схемой кабинета (schema.ts).
+   *  Refine по значениям (не Object.keys): кабинетная сторона может подать
+   *  объект с ключами-undefined из Formik-стейта — «пустой» он в обоих
+   *  смыслах. */
+  lifecycle: z.object({
+    activeInCategories: z.array(z.string().min(1)).min(1).optional(),
+    soldWithinDays: z.number().int().min(1).max(90).optional(),
+    hasStalledActive: z.literal(true).optional(),
+    firstListingWithinDays: z.number().int().min(1).max(30).optional(),
+  })
+    .refine((v) => Object.values(v).some((x) => x !== undefined), {
+      message: 'пустой lifecycle не имеет смысла — задайте хотя бы одно условие',
+    })
+    .optional(),
   /**
    * Where the promo may show. Omitted/`'both'` = any device. The BFF
    * select-promo filters candidates by the request's `device` (см.

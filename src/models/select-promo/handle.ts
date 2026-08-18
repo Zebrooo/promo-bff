@@ -9,12 +9,15 @@ import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
-import type { SearchHistoryEntry, PurchaseEntry } from '../../promo-selector/checkers';
+import type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal } from '../../promo-selector/checkers';
 import { hasSearchRule } from '../../promo-selector/checkers/registry/Search';
 import type { PurchaseLedgerService } from '../../services/purchase-ledger-service';
 import type { BalanceService } from '../../services/balance-service';
+import type { BehaviorSignalService } from '../../services/behavior-signal-service';
 import { hasPurchaseRule } from '../../promo-selector/checkers/registry/Purchases';
 import { hasBalanceRule } from '../../promo-selector/checkers/registry/Balance';
+import { hasInterestRule } from '../../promo-selector/checkers/registry/Interest';
+import { hasHotBuyerRule } from '../../promo-selector/checkers/registry/HotBuyer';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -32,6 +35,7 @@ export interface SelectPromoDeps {
   searchHistoryService: SearchHistoryService;
   purchaseLedgerService: PurchaseLedgerService;
   balanceService: BalanceService;
+  behaviorSignalService: BehaviorSignalService;
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
@@ -167,12 +171,48 @@ export async function loadWalletDataForSelection(
 }
 
 /**
+ * Load the behavior signal only when this walk can actually evaluate an
+ * interest/hot-buyer rule — близнец loadSearchHistoryForSelection. Failure →
+ * undefined: targeted promos fail closed, generic candidates той же очереди
+ * проходят (в частности, пока миграция RPC promo_viewer_behavior не применена,
+ * каждый вызов сервиса падает — и это штатная деградация, не error-envelope).
+ * minSessionViews сюда не входит — ему БД не нужна (сигнал приходит в params).
+ */
+export async function loadBehaviorForSelection(
+  params: SelectPromoParams,
+  promos: Promo[],
+  skip: string[],
+  deps: SelectPromoDeps,
+  logPrefix: 'select-promo' | 'select-promo-list',
+): Promise<BehaviorSignal | undefined> {
+  const needsInterest = !skip.includes('interest') && promos.some(hasInterestRule);
+  const needsHotBuyer = !skip.includes('hot-buyer') && promos.some(hasHotBuyerRule);
+  if ((!needsInterest && !needsHotBuyer) || !params.viewerKey) return undefined;
+
+  // p_user_id — только доказанная account-идентичность: RPC дочитает анонимные
+  // просмотры до логина. Анонимный promo_uid — не uuid, в RPC не передаётся.
+  const identity = resolveUserIdentity(params.user);
+  const accountUserId =
+    identity.isAuthorized && identity.identityKind === 'account' ? params.userId : undefined;
+
+  try {
+    return await deps.behaviorSignalService.getSignal(params.viewerKey, accountUserId);
+  } catch (err) {
+    deps.logger?.error(
+      { error: err instanceof Error ? err.message : 'unknown error' },
+      `${logPrefix}: behavior signal unavailable`,
+    );
+    return undefined;
+  }
+}
+
+/**
  * Strip a Promo to the renderable Advertisement (server-only selection fields
  * removed). Shared by handleSelectPromo + handleSelectPromoList so the strip
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, entrySources, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, lifecycle, entrySources, ...ad } = promo;
   return ad;
 }
 
@@ -229,8 +269,13 @@ export async function handleSelectPromo(
   }
 
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
-  const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo');
-  const wallet = await loadWalletDataForSelection(params, promos, skip, deps, 'select-promo');
+  // Три опциональные загрузки — параллельно: последовательно худший случай был
+  // бы 3×300 мс и не влез бы в бюджет сайта 800 мс. Ошибки каждая ловит внутри.
+  const [searchHistory, wallet, behavior] = await Promise.all([
+    loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo'),
+    loadWalletDataForSelection(params, promos, skip, deps, 'select-promo'),
+    loadBehaviorForSelection(params, promos, skip, deps, 'select-promo'),
+  ]);
 
   let promo: Promo | null;
   let trace: SelectionTrace | undefined;
@@ -251,6 +296,8 @@ export async function handleSelectPromo(
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,
+        behavior,
+        sessionViews: params.sessionViews,
         purchases: wallet.purchases,
         walletBalanceKopecks: wallet.walletBalanceKopecks,
         walletBalanceUnavailable: wallet.walletBalanceUnavailable,

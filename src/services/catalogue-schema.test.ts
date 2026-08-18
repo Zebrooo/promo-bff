@@ -481,3 +481,86 @@ describe('promoSchema — visit-profile targeting fields (WS-4)', () => {
     expect(promoSchema.safeParse(makePromo({ entrySources: [] } as never)).success).toBe(true);
   });
 });
+
+describe('promoSchema — behavior targeting (wave B)', () => {
+  it('parses a full behavior block and keeps it on the promo', () => {
+    const behavior = {
+      interest: { categories: ['shiny', 'diski'], lookbackDays: 7 },
+      hotBuyer: { minPhoneViews: 2 },
+      minSessionViews: 5,
+    };
+    const parsed = promoSchema.parse(makePromo({ targeting: { behavior } }));
+    expect(parsed.targeting.behavior).toEqual(behavior);
+  });
+
+  it('promo WITHOUT behavior parses byte-for-byte as before (обратная совместимость)', () => {
+    const parsed = promoSchema.parse(makePromo());
+    expect(parsed.targeting).not.toHaveProperty('behavior');
+  });
+
+  it('rejects out-of-range values (lookbackDays 0/15, minPhoneViews 0/51, minSessionViews 0/101, >20 категорий, пустой slug)', () => {
+    const bad = (behavior: unknown) =>
+      promoSchema.safeParse(makePromo({ targeting: { behavior } as never })).success;
+    expect(bad({ interest: { categories: ['shiny'], lookbackDays: 0 } })).toBe(false);
+    expect(bad({ interest: { categories: ['shiny'], lookbackDays: 15 } })).toBe(false);
+    expect(bad({ interest: { categories: [''] } })).toBe(false);
+    expect(bad({ interest: { categories: ['x'.repeat(65)] } })).toBe(false);
+    expect(bad({ interest: { categories: [] } })).toBe(false);
+    expect(bad({ interest: { categories: Array.from({ length: 21 }, (_, i) => `c${i}`) } })).toBe(false);
+    expect(bad({ hotBuyer: { minPhoneViews: 0 } })).toBe(false);
+    expect(bad({ hotBuyer: { minPhoneViews: 51 } })).toBe(false);
+    expect(bad({ minSessionViews: 0 })).toBe(false);
+    expect(bad({ minSessionViews: 101 })).toBe(false);
+  });
+
+  it('accepts boundary values (1/14, 1/50, 1/100, 20 категорий)', () => {
+    const ok = (behavior: unknown) =>
+      promoSchema.safeParse(makePromo({ targeting: { behavior } as never })).success;
+    expect(ok({ interest: { categories: ['shiny'], lookbackDays: 1 } })).toBe(true);
+    expect(ok({ interest: { categories: Array.from({ length: 20 }, (_, i) => `c${i}`), lookbackDays: 14 } })).toBe(true);
+    expect(ok({ hotBuyer: { minPhoneViews: 1 } })).toBe(true);
+    expect(ok({ hotBuyer: { minPhoneViews: 50 } })).toBe(true);
+    expect(ok({ minSessionViews: 1 })).toBe(true);
+    expect(ok({ minSessionViews: 100 })).toBe(true);
+  });
+});
+
+describe('promoSchema — lifecycle (wave B)', () => {
+  it('accepts a valid lifecycle block', () => {
+    const parsed = promoSchema.parse(makePromo({
+      lifecycle: {
+        activeInCategories: ['avto'], soldWithinDays: 14,
+        hasStalledActive: true, firstListingWithinDays: 7,
+      },
+    }));
+    expect(parsed.lifecycle?.soldWithinDays).toBe(14);
+  });
+
+  it('accepts each condition alone and the boundary values (1, 90, 30)', () => {
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { soldWithinDays: 1 } }))).not.toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { soldWithinDays: 90 } }))).not.toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { firstListingWithinDays: 30 } }))).not.toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { hasStalledActive: true } }))).not.toThrow();
+  });
+
+  it('rejects an empty lifecycle object and an all-undefined one (Formik-стейт кабинета)', () => {
+    expect(() => promoSchema.parse(makePromo({ lifecycle: {} }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { soldWithinDays: undefined } }))).toThrow();
+  });
+
+  it('rejects out-of-range days (0, 91, 31)', () => {
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { soldWithinDays: 0 } }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { soldWithinDays: 91 } }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { firstListingWithinDays: 31 } }))).toThrow();
+  });
+
+  it('rejects hasStalledActive: false (literal true only) and an empty categories list', () => {
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { hasStalledActive: false as never } }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ lifecycle: { activeInCategories: [] } }))).toThrow();
+  });
+
+  it('back-compat: a promo without lifecycle stays valid', () => {
+    expect(() => promoSchema.parse(makePromo())).not.toThrow();
+    expect(promoSchema.parse(makePromo()).lifecycle).toBeUndefined();
+  });
+});
