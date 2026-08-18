@@ -21,11 +21,15 @@ class NeedsListingStats extends Checker<'listingStats'> {
   check() { return true; }
 }
 
-function makeDeps(getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }))): SupplierDeps {
+function makeDeps(
+  getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} })),
+  getClicks = vi.fn(async () => ({ counts: {} })),
+): SupplierDeps {
   return {
     userService: { getUserProfile: vi.fn(async (id: string) => ({ userId: id, age: 30, region: 'ru', accountAgeDays: 3 })) },
     billingService: { getSubscription: vi.fn(async () => ({ level: 'plus' as const })) },
     impressionStore: { getImpressions, recordImpression: vi.fn(async () => {}) },
+    clickStore: { getClicks, recordClick: vi.fn(async () => {}) },
     listingService: { getListingStats: vi.fn(async () => makeListingStats(0).listingStats) },
   };
 }
@@ -45,7 +49,7 @@ describe('loadSuppliers', () => {
     const deps = makeDeps();
     const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
     expect(data.userData).toEqual({
-      age: 30, accountAgeDays: 3, region: 'ru', subscriptionLevel: 'plus', impressionCounts: {}, lastShownAt: {},
+      age: 30, accountAgeDays: 3, region: 'ru', subscriptionLevel: 'plus', impressionCounts: {}, lastShownAt: {}, clickCounts: {},
     });
     expect(deps.impressionStore.getImpressions).toHaveBeenCalledTimes(1);
   });
@@ -80,6 +84,28 @@ describe('loadSuppliers', () => {
     expect(getImpressions).toHaveBeenCalledTimes(2);
   });
 
+  it('loads clickCounts alongside impressions', async () => {
+    const deps = makeDeps(undefined, vi.fn(async () => ({ counts: { promoA: 2 } })));
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
+    expect(data.userData?.clickCounts).toEqual({ promoA: 2 });
+    expect(deps.clickStore.getClicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades to empty clickCounts when the click store rejects (fail-soft)', async () => {
+    const deps = makeDeps(undefined, vi.fn(async () => { throw new Error('boom'); }));
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
+    expect(data.userData?.clickCounts).toEqual({}); // выбор НЕ упал
+  });
+
+  it('reads clicks fresh on every selection (never TTL-cached)', async () => {
+    const getClicks = vi.fn(async () => ({ counts: {} }));
+    const deps = makeDeps(undefined, getClicks);
+    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
+    vi.advanceTimersByTime(USERDATA_TTL_MS - 1);
+    await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
+    expect(getClicks).toHaveBeenCalledTimes(2);
+  });
+
   it('refetches account metadata after the TTL expires', async () => {
     const getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }));
     const deps = makeDeps(getImpressions);
@@ -97,7 +123,7 @@ describe('loadSuppliers', () => {
     expect(deps.userService.getUserProfile).not.toHaveBeenCalled();
     expect(deps.billingService.getSubscription).not.toHaveBeenCalled();
     expect(deps.impressionStore.getImpressions).toHaveBeenCalledTimes(1);
-    expect(data.userData).toEqual({ age: undefined, region: '', subscriptionLevel: 'none', impressionCounts: {}, lastShownAt: {} });
+    expect(data.userData).toEqual({ age: undefined, region: '', subscriptionLevel: 'none', impressionCounts: {}, lastShownAt: {}, clickCounts: {} });
   });
 
   it('loads profile + billing for an account identity regardless of login state', async () => {

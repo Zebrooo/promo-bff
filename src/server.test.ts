@@ -316,6 +316,98 @@ describe('POST /impressions', () => {
   });
 });
 
+describe('POST /clicks', () => {
+  const postClick = (
+    app: ReturnType<typeof buildServer>,
+    payload: unknown,
+    headers: Record<string, string> = AUTH,
+  ) => app.inject({ method: 'POST', url: '/clicks', headers, payload: payload as object });
+
+  it('returns 401 when not authorized', async () => {
+    const app = buildServer({ logger: false });
+    expect((await postClick(app, { userId: 'u1', promoId: 'p1' }, {})).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns 400 on empty userId/promoId and on an unknown kind', async () => {
+    const app = buildServer({ logger: false });
+    expect((await postClick(app, { userId: 'u1' })).statusCode).toBe(400);
+    expect((await postClick(app, { promoId: 'p1' })).statusCode).toBe(400);
+    expect((await postClick(app, { userId: '', promoId: 'p1' })).statusCode).toBe(400);
+    expect((await postClick(app, { userId: 'u1', promoId: 'p1', kind: 'hover' })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('records the click (default kind cta) and returns { ok: true }', async () => {
+    const calls: Array<[string, string, string]> = [];
+    const app = buildServer({
+      logger: false,
+      deps: {
+        clickStore: {
+          getClicks: async () => ({ counts: {} }),
+          recordClick: async (userId, promoId, kind) => {
+            calls.push([userId, promoId, kind]);
+          },
+        },
+      },
+    });
+    const res = await postClick(app, { userId: 'u1', promoId: 'p1' });
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ ok: true });
+    expect(calls).toEqual([['u1', 'p1', 'cta']]);
+    await app.close();
+  });
+
+  it('accepts kind conversion explicitly', async () => {
+    const calls: string[] = [];
+    const app = buildServer({
+      logger: false,
+      deps: {
+        clickStore: {
+          getClicks: async () => ({ counts: {} }),
+          recordClick: async (_u, _p, kind) => {
+            calls.push(kind);
+          },
+        },
+      },
+    });
+    expect((await postClick(app, { userId: 'u1', promoId: 'p1', kind: 'conversion' })).statusCode).toBe(200);
+    expect(calls).toEqual(['conversion']);
+    await app.close();
+  });
+
+  it('skips campaign:* ids without touching the store', async () => {
+    const recordClick = vi.fn(async () => {});
+    const app = buildServer({
+      logger: false,
+      deps: { clickStore: { getClicks: async () => ({ counts: {} }), recordClick } },
+    });
+    const res = await postClick(app, { userId: 'u1', promoId: 'campaign:42' });
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ ok: true, skipped: 'campaign' });
+    expect(recordClick).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 502 when the click store is unavailable', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: {
+        clickStore: {
+          getClicks: async () => ({ counts: {} }),
+          recordClick: async () => {
+            throw new Error('db down');
+          },
+        },
+      },
+    });
+    const res = await postClick(app, { userId: 'u1', promoId: 'p1' });
+    expect(res.statusCode).toBe(502);
+    expect(body(res)).toEqual({ error: 'click_store_unavailable' });
+    await app.close();
+  });
+});
+
 describe('POST /auction', () => {
   const postAuction = (
     app: ReturnType<typeof buildServer>,

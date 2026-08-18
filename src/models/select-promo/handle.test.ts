@@ -4,6 +4,7 @@ import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
+import type { ClickStore } from '../../services/click-store';
 import type { ListingService } from '../../services/listing-service';
 import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
@@ -34,11 +35,18 @@ const fakeListingService = (over: Partial<ListingService> = {}): ListingService 
   ...over,
 });
 
+const fakeClickStore = (over: Partial<ClickStore> = {}): ClickStore => ({
+  getClicks: async () => ({ counts: {} }),
+  recordClick: async () => {},
+  ...over,
+});
+
 const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   configService: fakeConfigService(),
   userService: fakeUserService(),
   billingService: fakeBillingService(),
   impressionStore: fakeImpressionStore(),
+  clickStore: fakeClickStore(),
   listingService: fakeListingService(),
   searchHistoryService: { getSearchHistory: async () => [] },
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
@@ -890,6 +898,42 @@ describe('dayparting schedule (WS-3)', () => {
     const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
     expect(result.status).toBe('ok');
     expect((result as Extract<typeof result, { status: 'ok' }>).data).not.toHaveProperty('schedule');
+  });
+});
+
+describe('handleSelectPromo reaction targeting (wave C)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('strips suppressAfterClick and afterClickPromoId from the client Advertisement', async () => {
+    const promo = makePromo({ id: 'a', suppressAfterClick: true, afterClickPromoId: 'zzz-never-clicked' });
+    // afterClickPromoId ссылается на некликнутое промо → чекер бы заблокировал;
+    // поэтому кликнутость подкладываем через clickStore.
+    const clickStore = fakeClickStore({ getClicks: async () => ({ counts: { 'zzz-never-clicked': 1 } }) });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'strip-1' }, deps({ configService, clickStore }));
+    expect(result.status).toBe('ok');
+    const data = (result as Extract<typeof result, { status: 'ok' }>).data;
+    expect(data).not.toHaveProperty('suppressAfterClick');
+    expect(data).not.toHaveProperty('afterClickPromoId');
+  });
+
+  it('reaction: suppressAfterClick promo is skipped for a user who clicked it, queue advances', async () => {
+    const a = makePromo({ id: 'a', suppressAfterClick: true });
+    const b = makePromo({ id: 'b' });
+    const clickStore = fakeClickStore({ getClicks: async () => ({ counts: { a: 1 } }) });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [a, b], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'react-1' }, deps({ configService, clickStore }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'b' } });
+  });
+
+  it('click-store outage is fail-soft: suppressAfterClick promo still shows (перепоказ приемлем)', async () => {
+    const promo = makePromo({ id: 'a', suppressAfterClick: true });
+    const clickStore = fakeClickStore({ getClicks: async () => { throw new Error('supabase down'); } });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'soft-1' }, deps({ configService, clickStore }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'a' } });
   });
 });
 

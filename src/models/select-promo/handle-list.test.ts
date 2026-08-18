@@ -18,6 +18,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   userService: { getUserProfile: async (userId) => ({ userId, age: 30, region: 'ru' }) } as UserService,
   billingService: { getSubscription: async () => ({ level: 'plus' }) } as BillingService,
   impressionStore: { getImpressions: async () => ({ counts: {}, lastShownAt: {} }), recordImpression: async () => {} } as ImpressionStore,
+  clickStore: { getClicks: async () => ({ counts: {} }), recordClick: async () => {} },
   listingService: { getListingStats: async () => makeListingStats(0).listingStats } as ListingService,
   searchHistoryService: { getSearchHistory: async () => [] },
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },

@@ -115,6 +115,11 @@ export const promoSchema = z.object({
   /** Chain: id of the predecessor promo — this promo shows only after the user
    *  has a recorded impression of it (ChainChecker). Mirrors the cabinet schema. */
   afterPromoId: z.string().min(1).max(64).optional(),
+  /** Chain по клику: показ только кликнувшим по предшественнику (ChainChecker,
+   *  читает promo_clicks). Mirrors the cabinet schema. */
+  afterClickPromoId: z.string().min(1).max(64).optional(),
+  /** Анти-таргетинг: скрыть промо после клика по его CTA (ReactionChecker). */
+  suppressAfterClick: z.boolean().optional(),
   format: promoFormatSchema,
   /** Custom format only: picks the host-owned render function via the
    *  <PromoProvider customFormats> map. Field-level optional here; the cabinet
