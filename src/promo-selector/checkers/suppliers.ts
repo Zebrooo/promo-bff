@@ -1,6 +1,7 @@
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
+import type { ClickStore } from '../../services/click-store';
 import type { ListingService } from '../../services/listing-service';
 import { Checker, type IdentityKind, type ListingStats, type SupplierId, type SuppliersData, type UserData } from './Checker';
 
@@ -8,6 +9,7 @@ export interface SupplierDeps {
   userService: UserService;
   billingService: BillingService;
   impressionStore: ImpressionStore;
+  clickStore: ClickStore;
   listingService: ListingService;
 }
 
@@ -78,14 +80,20 @@ async function loadUserData(userId: string, identityKind: IdentityKind, deps: Su
   // Impression ids exist for account and anonymous cookie identities. Keep this
   // call outside every TTL cache: POST /impressions must affect the very next
   // selection and another instance must see the shared-store write immediately.
-  const [account, impressions] = await Promise.all([
+  // Clicks: тот же режим «всегда свежие», но fail-soft — сбой чтения promo_clicks
+  // деградирует в clickCounts = {} и НЕ валит выбор (спека §6: reaction покажет
+  // промо лишний раз, chain(afterClick) придержит «дожим» — оба исхода приемлемы;
+  // семантика показов, чей сбой по-прежнему валит выбор, не меняется).
+  const [account, impressions, clicks] = await Promise.all([
     loadAccountData(userId, identityKind, deps),
     deps.impressionStore.getImpressions(userId),
+    deps.clickStore.getClicks(userId).catch(() => ({ counts: {} })),
   ]);
   return {
     ...account,
     impressionCounts: impressions.counts,
     lastShownAt: impressions.lastShownAt,
+    clickCounts: clicks.counts,
   };
 }
 

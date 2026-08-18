@@ -27,7 +27,7 @@ export async function handleSelectPromoList(
   params: SelectPromoParams,
   deps: SelectPromoDeps,
 ): Promise<PromoListResult> {
-  const { configService, userService, billingService, impressionStore, listingService, logger } = deps;
+  const { configService, userService, billingService, impressionStore, clickStore, listingService, logger } = deps;
   const now = deps.now?.() ?? new Date();
   const identity = resolveUserIdentity(params.user);
   const queueName = params.queue ?? 'main';
@@ -82,7 +82,7 @@ export async function handleSelectPromoList(
       },
       {
         skip,
-        deps: { userService, billingService, impressionStore, listingService },
+        deps: { userService, billingService, impressionStore, clickStore, listingService },
         logger,
         onTrace: (t) => {
           trace = t;

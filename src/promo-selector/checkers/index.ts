@@ -19,6 +19,7 @@ import { SellerChecker } from './registry/Seller';
 import { LifecycleChecker } from './registry/Lifecycle';
 import { ListingsChecker } from './registry/Listings';
 import { LimitChecker, CooldownChecker } from './registry/Frequency';
+import { ReactionChecker } from './registry/Reaction';
 import { ChainChecker } from './registry/Chain';
 
 export { Checker } from './Checker';
@@ -49,5 +50,6 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new ListingsChecker(),
   new LimitChecker(),
   new CooldownChecker(),
+  new ReactionChecker(),
   new ChainChecker(),
 ];

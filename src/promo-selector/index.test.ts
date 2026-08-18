@@ -11,6 +11,7 @@ function makeDeps(over: Partial<{ counts: Record<string, number>; lastShownAt: R
       getImpressions: async () => ({ counts: over.counts ?? {}, lastShownAt: over.lastShownAt ?? {} }),
       recordImpression: async () => {},
     },
+    clickStore: { getClicks: async () => ({ counts: {} }), recordClick: async () => {} },
     listingService: { getListingStats: async () => makeListingStats(0).listingStats },
   };
 }
@@ -95,10 +96,10 @@ describe('selectPromo', () => {
     __clearUserDataCache();
     const deps = makeDeps();
     const getImpressions = vi.spyOn(deps.impressionStore, 'getImpressions');
-    // skip the userData checkers (targeting/visitor/limit/cooldown/chain) → context-only remain
+    // skip the userData checkers (targeting/visitor/limit/cooldown/reaction/chain) → context-only remain
     await selectPromo([makePromo({ id: 'a' })], ctx, {
       deps,
-      skip: ['targeting', 'visitor', 'limit', 'cooldown', 'chain'],
+      skip: ['targeting', 'visitor', 'limit', 'cooldown', 'reaction', 'chain'],
     });
     expect(getImpressions).not.toHaveBeenCalled();
   });
@@ -242,7 +243,7 @@ describe('selectPromo env targeting', () => {
     expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
       'date', 'targeting', 'geo', 'audience', 'visitor', 'source', 'context', 'search', 'purchases', 'balance',
       'interest', 'hot-buyer', 'engagement',
-      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'limit', 'cooldown', 'chain',
+      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'limit', 'cooldown', 'reaction', 'chain',
     ]);
   });
 

@@ -97,6 +97,9 @@ export interface UserData {
   subscriptionLevel: SubscriptionLevel;
   impressionCounts: Record<string, number>;
   lastShownAt: Record<string, string>;
+  /** promoId -> суммарные клики этого пользователя (cta + conversion).
+   *  Fail-soft: сбой чтения promo_clicks даёт {} (см. suppliers.loadUserData). */
+  clickCounts: Record<string, number>;
 }
 
 import type { ListingStats } from '../../services/listing-service';

@@ -174,6 +174,11 @@ export interface Promo {
    *  after the user has at least one recorded impression of that predecessor
    *  (см. ChainChecker). Omitted = no chaining. */
   afterPromoId?: string;
+  /** Chain по КЛИКУ: id промо-предшественника. When set, this promo is eligible
+   *  only after the user has at least one recorded CTA click on that predecessor
+   *  (см. ChainChecker; читает promo_clicks). Оба chain-поля заданы → AND.
+   *  Omitted = no click-chaining. */
+  afterClickPromoId?: string;
   /** Display format for the renderer. */
   format: PromoFormat;
   /** Custom format only: picks the host-owned render function via the
@@ -242,6 +247,10 @@ export interface Promo {
   /** Device gate: 'desktop'/'touch' restricts to that device; 'both'/omitted = any.
    *  Enforced by the DeviceChecker against the request's `device`. */
   deviceTarget?: 'desktop' | 'touch' | 'both';
+  /** Анти-таргетинг: true = скрыть промо от пользователя, кликнувшего по его
+   *  CTA (или достигшего конверсии) — ReactionChecker. Omitted/false = показ
+   *  не зависит от кликов. Server-only: клиенту не отдаётся. */
+  suppressAfterClick?: boolean;
   /** Классы источника захода, при которых промо можно показывать (SourceChecker).
    *  Подмножество 4 классов; нет/пусто = любой источник (чекер скипается). */
   entrySources?: EntrySource[];

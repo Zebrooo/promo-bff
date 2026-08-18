@@ -7,6 +7,7 @@ import { createConfigService } from './services/config-service';
 import { createUserService } from './services/user-service';
 import { createBillingService } from './services/billing-service';
 import { createImpressionStore } from './services/impression-store';
+import { createClickStore } from './services/click-store';
 import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
@@ -156,6 +157,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     userService: createUserService(),
     billingService: createBillingService(),
     impressionStore: createImpressionStore(),
+    clickStore: createClickStore(),
     listingService: createListingService(),
     searchHistoryService: createSearchHistoryService(),
     purchaseLedgerService: createPurchaseLedgerService(),
@@ -381,6 +383,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     } catch (err) {
       app.log.error({ err }, 'POST /impressions: store/charge unavailable');
       return reply.code(502).send({ error: 'impression_store_unavailable' });
+    }
+
+    return reply.code(200).send({ ok: true });
+  });
+
+  // Records a user's CTA click on a promo (upsert into promo_clicks). Питает
+  // reaction-чекер (suppressAfterClick) и chain по клику (afterClickPromoId).
+  // Same service-ticket auth as /models. Body: { userId, promoId, kind? }.
+  // kind 'conversion' принимается с первого дня (схема готова), но репорт
+  // конверсий в v1 никто не шлёт — см. спеку reaction §4 «Конверсия».
+  app.post('/clicks', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+
+    const body = (request.body ?? {}) as { userId?: unknown; promoId?: unknown; kind?: unknown };
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+    const promoId = typeof body.promoId === 'string' ? body.promoId.trim() : '';
+    const kind = body.kind === undefined ? 'cta' : body.kind;
+    if (!userId || !promoId) {
+      return reply
+        .code(400)
+        .send({ error: 'bad_request', reason: 'userId and promoId are required non-empty strings' });
+    }
+    if (kind !== 'cta' && kind !== 'conversion') {
+      return reply.code(400).send({ error: 'bad_request', reason: "kind must be 'cta' or 'conversion'" });
+    }
+
+    // Клики по кампаниям здесь не живут — у них свой биллинговый контур
+    // (/api/fp/v, view-токены). 200 skipped, чтобы клиент не ретраил.
+    if (promoId.startsWith('campaign:')) {
+      return reply.code(200).send({ ok: true, skipped: 'campaign' });
+    }
+
+    try {
+      await deps.clickStore.recordClick(userId, promoId, kind);
+    } catch (err) {
+      app.log.error({ err }, 'POST /clicks: store unavailable');
+      return reply.code(502).send({ error: 'click_store_unavailable' });
     }
 
     return reply.code(200).send({ ok: true });

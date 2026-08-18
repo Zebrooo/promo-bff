@@ -2,6 +2,7 @@ import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
+import type { ClickStore } from '../../services/click-store';
 import type { ListingService } from '../../services/listing-service';
 import type { SearchHistoryService } from '../../services/search-history-service';
 import type { CheckerStatsService } from '../../services/checker-stats';
@@ -31,6 +32,7 @@ export interface SelectPromoDeps {
   userService: UserService;
   billingService: BillingService;
   impressionStore: ImpressionStore;
+  clickStore: ClickStore;
   listingService: ListingService;
   searchHistoryService: SearchHistoryService;
   purchaseLedgerService: PurchaseLedgerService;
@@ -212,7 +214,7 @@ export async function loadBehaviorForSelection(
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, lifecycle, entrySources, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, afterClickPromoId, suppressAfterClick, audience, sections, categories, sellerStatus, lifecycle, entrySources, ...ad } = promo;
   return ad;
 }
 
@@ -251,7 +253,7 @@ export async function handleSelectPromo(
   params: SelectPromoParams,
   deps: SelectPromoDeps,
 ): Promise<ModelResult> {
-  const { configService, userService, billingService, impressionStore, listingService, logger } = deps;
+  const { configService, userService, billingService, impressionStore, clickStore, listingService, logger } = deps;
   const now = deps.now?.() ?? new Date();
   const identity = resolveUserIdentity(params.user);
 
@@ -305,7 +307,7 @@ export async function handleSelectPromo(
       },
       {
         skip,
-        deps: { userService, billingService, impressionStore, listingService },
+        deps: { userService, billingService, impressionStore, clickStore, listingService },
         logger,
         onTrace: (t) => {
           trace = t;

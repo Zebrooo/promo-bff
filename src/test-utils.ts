@@ -34,6 +34,7 @@ export function makeSuppliers(userData: Partial<UserData> = {}): { userData: Use
       subscriptionLevel: 'plus',
       impressionCounts: {},
       lastShownAt: {},
+      clickCounts: {},
       ...userData,
     },
   };
