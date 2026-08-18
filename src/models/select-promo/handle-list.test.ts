@@ -205,3 +205,32 @@ describe('IP-geo targeting (WS-2, list)', () => {
     expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
   });
 });
+
+describe('visit-profile targeting (WS-4, list)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('passes params.visit down to the checkers and strips entrySources from steps', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [makePromo({ id: 'tg', entrySources: ['telegram'] }), makePromo({ id: 'open' })],
+        persist: false,
+      }),
+    });
+    const withVisit = await handleSelectPromoList(
+      { userId: 'u1', visit: { source: 'telegram' } },
+      deps({ configService }),
+    );
+    expect(withVisit.status).toBe('ok');
+    if (withVisit.status !== 'ok') return;
+    expect(withVisit.steps.map((s) => s.id)).toEqual(['tg', 'open']);
+    expect(withVisit.steps[0]).not.toHaveProperty('entrySources');
+
+    __clearUserDataCache();
+    const noVisit = await handleSelectPromoList({ userId: 'u1' }, deps({ configService }));
+    expect(noVisit.status).toBe('ok');
+    if (noVisit.status !== 'ok') return;
+    expect(noVisit.steps.map((s) => s.id)).toEqual(['open']);
+  });
+});

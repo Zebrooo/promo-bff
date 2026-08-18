@@ -343,3 +343,39 @@ describe('params.geo (IP-geo, WS-2)', () => {
     if (result.ok) expect(result.params.skipCheckers).toEqual(['geo']);
   });
 });
+
+describe('params.visit (visit-profile, WS-4)', () => {
+  it('accepts and canonicalizes a full visit object', () => {
+    const r = validateParams({ userId: 'u1', visit: { source: 'telegram', firstSeenDaysAgo: 3, visitDays: 6, junk: 'x' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.visit).toEqual({ source: 'telegram', firstSeenDaysAgo: 3, visitDays: 6 });
+  });
+
+  it('accepts partial visit and omits an empty one', () => {
+    const partial = validateParams({ userId: 'u1', visit: { visitDays: 2 } });
+    expect(partial.ok).toBe(true);
+    if (partial.ok) expect(partial.params.visit).toEqual({ visitDays: 2 });
+    const empty = validateParams({ userId: 'u1', visit: {} });
+    expect(empty.ok).toBe(true);
+    if (empty.ok) expect(empty.params.visit).toBeUndefined();
+  });
+
+  it('omitting visit entirely is fine (back-compat)', () => {
+    const r = validateParams({ userId: 'u1' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.visit).toBeUndefined();
+  });
+
+  it('rejects a non-object, bad enum, fractional/negative/huge days', () => {
+    expect(validateParams({ userId: 'u1', visit: 'telegram' }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', visit: ['telegram'] }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', visit: { source: 'vk' } }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', visit: { firstSeenDaysAgo: 1.5 } }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', visit: { visitDays: -1 } }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', visit: { visitDays: 10_001 } }).ok).toBe(false);
+  });
+
+  it("skipCheckers allowlist auto-includes 'visitor' and 'source'", () => {
+    expect(validateParams({ userId: 'u1', skipCheckers: ['visitor', 'source'] }).ok).toBe(true);
+  });
+});

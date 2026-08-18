@@ -172,7 +172,7 @@ export async function loadWalletDataForSelection(
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, entrySources, ...ad } = promo;
   return ad;
 }
 
@@ -247,6 +247,7 @@ export async function handleSelectPromo(
         device: params.device,
         env: params.env,
         geo: params.geo,
+        visit: params.visit,
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,

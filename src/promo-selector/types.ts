@@ -28,6 +28,9 @@ export interface PromoEnvSignal {
 /** IP-гео сегмент «где пользователь СЕЙЧАС», разрезолвленный сайтом (не сырой IP). */
 export type GeoSegment = 'local' | 'tourist' | 'other';
 
+/** Класс источника захода текущей сессии (aa_src, свёрнут сайтом до 4 значений). */
+export type EntrySource = 'direct' | 'search' | 'telegram' | 'other';
+
 export interface ImageFocalPoint {
   /** Horizontal coordinate in basis points: 0 = left, 10_000 = right. */
   xBp: number;
@@ -52,6 +55,12 @@ export interface PromoTargeting {
   geoSegments?: GeoSegment[];
   /** IP-гео: допустимые города (слаги, та же номенклатура, что profiles.city). Пусто/нет = любой. */
   geoCities?: string[];
+  /** 'newcomer' | 'regular'; нет поля = любой посетитель (VisitorChecker скипается). */
+  visitorClass?: 'newcomer' | 'regular';
+  /** Только при visitorClass='newcomer'; дефолт 7 (DEFAULT_NEWCOMER_MAX_AGE_DAYS). */
+  newcomerMaxAgeDays?: number;
+  /** Только при visitorClass='regular'; дефолт 5 (DEFAULT_REGULAR_MIN_VISIT_DAYS). */
+  regularMinVisitDays?: number;
   /** Search-history gate. Omitted/empty means no search targeting. */
   search?: {
     /** Normalized phrases to find in past search queries. */
@@ -199,4 +208,7 @@ export interface Promo {
   /** Device gate: 'desktop'/'touch' restricts to that device; 'both'/omitted = any.
    *  Enforced by the DeviceChecker against the request's `device`. */
   deviceTarget?: 'desktop' | 'touch' | 'both';
+  /** Классы источника захода, при которых промо можно показывать (SourceChecker).
+   *  Подмножество 4 классов; нет/пусто = любой источник (чекер скипается). */
+  entrySources?: EntrySource[];
 }

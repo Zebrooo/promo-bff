@@ -1,7 +1,14 @@
-import type { GeoSegment, Promo, PromoEnvSignal, SubscriptionLevel } from '../types';
+import type { EntrySource, GeoSegment, Promo, PromoEnvSignal, SubscriptionLevel } from '../types';
 
 /** Stable identity source, independent from current login state. */
 export type IdentityKind = 'account' | 'anonymous';
+
+/** Сигналы профиля визита, свёрнутые сайтом из кук (спека targeting-visit-profile §4). */
+export interface VisitContext {
+  source?: EntrySource;
+  firstSeenDaysAgo?: number;
+  visitDays?: number;
+}
 
 /** Per-promo evaluation context (identity + clock + the candidate promo). */
 export interface CheckContext {
@@ -9,6 +16,10 @@ export interface CheckContext {
   userId: string;
   /** Current login state. This affects audience eligibility only. */
   isAuthorized: boolean;
+  /** Stable identity source; VisitorChecker выбирает по нему сигнал возраста. */
+  identityKind?: IdentityKind;
+  /** Профиль визита из params.visit; undefined = сайт сигнал не прислал. */
+  visit?: VisitContext;
   now: Date;
   /** Page section the user is browsing (overlay only; undefined elsewhere). */
   section?: string;
@@ -65,6 +76,8 @@ export type SupplierId = 'userData' | 'listingStats';
 export interface UserData {
   /** Full years; undefined when the user has no birthdate. */
   age?: number;
+  /** Полных дней от profiles.created_at; undefined для анонима / без данных. */
+  accountAgeDays?: number;
   region: string;
   subscriptionLevel: SubscriptionLevel;
   impressionCounts: Record<string, number>;

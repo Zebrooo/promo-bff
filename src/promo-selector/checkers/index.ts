@@ -3,6 +3,8 @@ import { DateChecker } from './registry/Date';
 import { TargetingChecker } from './registry/Targeting';
 import { GeoChecker } from './registry/Geo';
 import { AudienceChecker } from './registry/Audience';
+import { VisitorChecker } from './registry/Visitor';
+import { SourceChecker } from './registry/Source';
 import { ContextChecker } from './registry/Context';
 import { SearchChecker } from './registry/Search';
 import { PurchaseChecker } from './registry/Purchases';
@@ -26,6 +28,8 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new TargetingChecker(),
   new GeoChecker(),
   new AudienceChecker(),
+  new VisitorChecker(),
+  new SourceChecker(),
   new ContextChecker(),
   new SearchChecker(),
   new PurchaseChecker(),

@@ -445,3 +445,39 @@ describe('promoSchema — schedule (dayparting, WS-3)', () => {
     }
   });
 });
+
+describe('promoSchema — visit-profile targeting fields (WS-4)', () => {
+  it('accepts visitorClass with thresholds and entrySources', () => {
+    const promo = makePromo({
+      targeting: { visitorClass: 'newcomer', newcomerMaxAgeDays: 14 } as never,
+      entrySources: ['telegram', 'search'] as never,
+    });
+    const res = promoSchema.safeParse(promo);
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.targeting.visitorClass).toBe('newcomer');
+      expect(res.data.targeting.newcomerMaxAgeDays).toBe(14);
+      expect(res.data.entrySources).toEqual(['telegram', 'search']);
+    }
+  });
+
+  it('old promos without the new fields still parse (back-compat)', () => {
+    const res = promoSchema.safeParse(makePromo());
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.entrySources).toBeUndefined();
+      expect(res.data.targeting.visitorClass).toBeUndefined();
+    }
+  });
+
+  it('rejects out-of-range thresholds and unknown source classes', () => {
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'newcomer', newcomerMaxAgeDays: 0 } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'regular', regularMinVisitDays: 31 } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'vip' } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ entrySources: ['vk'] } as never)).success).toBe(false);
+  });
+
+  it('accepts an empty entrySources array (lenient pool must not drop the promo)', () => {
+    expect(promoSchema.safeParse(makePromo({ entrySources: [] } as never)).success).toBe(true);
+  });
+});

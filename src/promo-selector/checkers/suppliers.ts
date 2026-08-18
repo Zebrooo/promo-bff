@@ -56,20 +56,21 @@ async function cached<T>(supplierId: CacheableSupplierId, userId: string, identi
 
 interface AccountData {
   age?: number;
+  accountAgeDays?: number;
   region: string;
   subscriptionLevel: UserData['subscriptionLevel'];
 }
 
 function loadAccountData(userId: string, identityKind: IdentityKind, deps: SupplierDeps): Promise<AccountData> {
   if (identityKind === 'anonymous') {
-    return Promise.resolve({ age: undefined, region: '', subscriptionLevel: 'none' });
+    return Promise.resolve({ age: undefined, accountAgeDays: undefined, region: '', subscriptionLevel: 'none' });
   }
   return cached('accountData', userId, identityKind, async () => {
     const [profile, subscription] = await Promise.all([
       deps.userService.getUserProfile(userId),
       deps.billingService.getSubscription(userId),
     ]);
-    return { age: profile.age, region: profile.region, subscriptionLevel: subscription.level };
+    return { age: profile.age, accountAgeDays: profile.accountAgeDays, region: profile.region, subscriptionLevel: subscription.level };
   });
 }
 

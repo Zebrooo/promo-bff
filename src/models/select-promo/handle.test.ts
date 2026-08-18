@@ -891,3 +891,41 @@ describe('dayparting schedule (WS-3)', () => {
     expect((result as Extract<typeof result, { status: 'ok' }>).data).not.toHaveProperty('schedule');
   });
 });
+
+describe('visit-profile targeting (WS-4)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const queueOf = (promos: ReturnType<typeof makePromo>[]) =>
+    fakeConfigService({ getQueue: async () => ({ promos, persist: false }) });
+
+  it('strips entrySources (and the new targeting) from the Advertisement', async () => {
+    const promo = makePromo({ entrySources: ['telegram'], targeting: { visitorClass: 'regular' } });
+    const result = await handleSelectPromo(
+      { userId: 'u1', visit: { source: 'telegram', visitDays: 9 } },
+      deps({ configService: queueOf([promo]) }),
+    );
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.data).not.toHaveProperty('entrySources');
+      expect(result.data).not.toHaveProperty('targeting');
+    }
+  });
+
+  it('visit reaches the checkers: source mismatch filters the promo', async () => {
+    const promo = makePromo({ entrySources: ['search'] });
+    const result = await handleSelectPromo(
+      { userId: 'u1', visit: { source: 'telegram' } },
+      deps({ configService: queueOf([promo]) }),
+    );
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('no visit at all: source-gated promo fails closed, untargeted promo wins', async () => {
+    const gated = makePromo({ id: 'gated', entrySources: ['telegram'] });
+    const open = makePromo({ id: 'open' });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService: queueOf([gated, open]) }));
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.data.id).toBe('open');
+  });
+});

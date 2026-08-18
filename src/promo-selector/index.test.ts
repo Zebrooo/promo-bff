@@ -95,10 +95,10 @@ describe('selectPromo', () => {
     __clearUserDataCache();
     const deps = makeDeps();
     const getImpressions = vi.spyOn(deps.impressionStore, 'getImpressions');
-    // skip the four userData checkers → only date + audience remain
+    // skip the userData checkers (targeting/visitor/limit/cooldown/chain) → context-only remain
     await selectPromo([makePromo({ id: 'a' })], ctx, {
       deps,
-      skip: ['targeting', 'limit', 'cooldown', 'chain'],
+      skip: ['targeting', 'visitor', 'limit', 'cooldown', 'chain'],
     });
     expect(getImpressions).not.toHaveBeenCalled();
   });
@@ -240,7 +240,7 @@ describe('selectPromoList', () => {
 describe('selectPromo env targeting', () => {
   it("checker order: 'env' стоит сразу после 'device' (Date → … → Device → Env → Format → …)", () => {
     expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
-      'date', 'targeting', 'geo', 'audience', 'context', 'search', 'purchases', 'balance',
+      'date', 'targeting', 'geo', 'audience', 'visitor', 'source', 'context', 'search', 'purchases', 'balance',
       'device', 'env', 'format', 'seller', 'listings', 'limit', 'cooldown', 'chain',
     ]);
   });

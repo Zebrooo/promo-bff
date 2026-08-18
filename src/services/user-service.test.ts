@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createUserService, ageFromBirthdate, UNKNOWN_REGION } from './user-service';
+import { createUserService, ageFromBirthdate, accountAgeDaysFrom, UNKNOWN_REGION } from './user-service';
 
 const cfg = { url: 'https://db.example', serviceRoleKey: 'k', timeoutMs: 2000 };
 const NOW = new Date('2026-05-27T00:00:00Z');
@@ -52,5 +52,38 @@ describe('createUserService', () => {
   it('throws on a query failure', async () => {
     mockFetch(500, {});
     await expect(createUserService(cfg).getUserProfile('u1')).rejects.toThrow(/HTTP 500/);
+  });
+});
+
+describe('accountAgeDaysFrom', () => {
+  it('computes full days since created_at', () => {
+    expect(accountAgeDaysFrom('2026-05-20T12:00:00Z', NOW)).toBe(6); // 6.5 суток → 6 полных
+    expect(accountAgeDaysFrom('2026-05-27T00:00:00Z', NOW)).toBe(0);
+    expect(accountAgeDaysFrom('2020-05-27T00:00:00Z', NOW)).toBe(2191);
+  });
+  it('future created_at (clock skew) → 0, not negative', () => {
+    expect(accountAgeDaysFrom('2026-05-28T00:00:00Z', NOW)).toBe(0);
+  });
+  it('null / garbage → undefined', () => {
+    expect(accountAgeDaysFrom(null, NOW)).toBeUndefined();
+    expect(accountAgeDaysFrom('', NOW)).toBeUndefined();
+    expect(accountAgeDaysFrom('not-a-date', NOW)).toBeUndefined();
+  });
+});
+
+describe('createUserService accountAgeDays', () => {
+  it('selects created_at and maps it to accountAgeDays', async () => {
+    const fetchMock = vi.fn(async (_url: string) => ({
+      ok: true, status: 200,
+      json: async () => [{ city: 'gagra', birthdate: null, created_at: '2020-01-01T00:00:00Z' }],
+    }) as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const p = await createUserService(cfg).getUserProfile('u1');
+    expect(typeof p.accountAgeDays).toBe('number');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('select=city,birthdate,created_at');
+  });
+  it('missing row → accountAgeDays undefined (default profile)', async () => {
+    mockFetch(200, []);
+    expect((await createUserService(cfg).getUserProfile('u1')).accountAgeDays).toBeUndefined();
   });
 });
