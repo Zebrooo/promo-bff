@@ -25,6 +25,9 @@ export interface PromoEnvSignal {
   brand?: DeviceBrand;
 }
 
+/** IP-гео сегмент «где пользователь СЕЙЧАС», разрезолвленный сайтом (не сырой IP). */
+export type GeoSegment = 'local' | 'tourist' | 'other';
+
 export interface ImageFocalPoint {
   /** Horizontal coordinate in basis points: 0 = left, 10_000 = right. */
   xBp: number;
@@ -45,6 +48,10 @@ export interface PromoTargeting {
   environments?: PromoEnvironment[];
   /** Allowed device-brand classes (платёжеспособность-прокси по UA); empty/omitted = any. */
   deviceBrands?: DeviceBrand[];
+  /** IP-гео: допустимые сегменты «где сейчас». Пусто/нет = любой. НЕ regions: та ось — город из ПРОФИЛЯ. */
+  geoSegments?: GeoSegment[];
+  /** IP-гео: допустимые города (слаги, та же номенклатура, что profiles.city). Пусто/нет = любой. */
+  geoCities?: string[];
   /** Search-history gate. Omitted/empty means no search targeting. */
   search?: {
     /** Normalized phrases to find in past search queries. */

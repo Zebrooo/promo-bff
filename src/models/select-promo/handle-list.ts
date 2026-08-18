@@ -62,6 +62,7 @@ export async function handleSelectPromoList(
         category: params.context?.category,
         device: params.device,
         env: params.env,
+        geo: params.geo,
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,

@@ -246,6 +246,7 @@ export async function handleSelectPromo(
         category: params.context?.category,
         device: params.device,
         env: params.env,
+        geo: params.geo,
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,

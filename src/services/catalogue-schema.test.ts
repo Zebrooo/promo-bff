@@ -394,3 +394,25 @@ describe('promoSchema — env-таргетинг (os/environments/deviceBrands)'
     expect(rejected[0].promoId).toBe('broken');
   });
 });
+
+describe('promoSchema — targeting geo fields (IP-geo, WS-2)', () => {
+  it('parses geoSegments + geoCities and round-trips them', () => {
+    const parsed = promoSchema.parse(makePromo({
+      targeting: { geoSegments: ['local', 'tourist'], geoCities: ['sukhum', 'sochi'] } as never,
+    }));
+    expect(parsed.targeting.geoSegments).toEqual(['local', 'tourist']);
+    expect(parsed.targeting.geoCities).toEqual(['sukhum', 'sochi']);
+  });
+
+  it('rejects an unknown segment and an empty/oversized city slug', () => {
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoSegments: ['moon'] } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoCities: [''] } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoCities: ['x'.repeat(65)] } as never })).success).toBe(false);
+  });
+
+  it('old JSON without geo fields parses byte-for-byte as before (regression)', () => {
+    const parsed = promoSchema.parse(makePromo());
+    expect(parsed.targeting).not.toHaveProperty('geoSegments');
+    expect(parsed.targeting).not.toHaveProperty('geoCities');
+  });
+});

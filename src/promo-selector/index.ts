@@ -1,4 +1,4 @@
-import type { Promo, PromoEnvSignal } from './types';
+import type { GeoSegment, Promo, PromoEnvSignal } from './types';
 import type { IdentityKind } from './checkers/Checker';
 import {
   Checker,
@@ -59,6 +59,8 @@ export interface SelectPromoContext {
   device?: 'desktop' | 'touch' | 'app';
   /** Env-сигнал (ОС/среда/класс устройства); undefined = сигнала нет (EnvChecker fail-closed). */
   env?: PromoEnvSignal;
+  /** Viewer IP-geo, разрезолвленный сайтом. Undefined = сигнала нет (GeoChecker fail-closed для гео-промо). */
+  geo?: { segment: GeoSegment; city?: string };
   /** Formats the requesting surface accepts; gates promos by format. Undefined/empty = no filter. */
   formats?: string[];
   /** Promo ids to drop from the queue BEFORE the checkers run. Undefined/empty = no exclusion. */
@@ -141,6 +143,8 @@ async function evaluateCandidate(
     category: ctx.category,
     device: ctx.device,
     env: ctx.env,
+    geoSegment: ctx.geo?.segment,
+    geoCity: ctx.geo?.city,
     formats: ctx.formats,
     searchHistory: ctx.searchHistory,
     purchases: ctx.purchases,

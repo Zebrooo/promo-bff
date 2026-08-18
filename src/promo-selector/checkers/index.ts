@@ -1,6 +1,7 @@
 import { Checker, type SupplierId } from './Checker';
 import { DateChecker } from './registry/Date';
 import { TargetingChecker } from './registry/Targeting';
+import { GeoChecker } from './registry/Geo';
 import { AudienceChecker } from './registry/Audience';
 import { ContextChecker } from './registry/Context';
 import { SearchChecker } from './registry/Search';
@@ -23,6 +24,7 @@ export { loadSuppliers, type SupplierDeps } from './suppliers';
 export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new DateChecker(),
   new TargetingChecker(),
+  new GeoChecker(),
   new AudienceChecker(),
   new ContextChecker(),
   new SearchChecker(),

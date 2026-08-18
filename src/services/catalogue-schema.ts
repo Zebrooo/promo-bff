@@ -9,6 +9,7 @@ export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 export const promoOsSchema = z.enum(['ios', 'android']);
 export const promoEnvironmentSchema = z.enum(['browser', 'telegram', 'pwa', 'app']);
 export const deviceBrandSchema = z.enum(['iphone', 'android-flagship', 'android-other']);
+export const geoSegmentSchema = z.enum(['local', 'tourist', 'other']);
 
 export const searchTargetingSchema = z.object({
   terms: z.array(
@@ -61,6 +62,9 @@ export const promoSchema = z.object({
     os: z.array(promoOsSchema).optional(),
     environments: z.array(promoEnvironmentSchema).optional(),
     deviceBrands: z.array(deviceBrandSchema).optional(),
+    /** IP-гео (GeoChecker): сегменты «где сейчас» + города-слаги. Mirrors the cabinet schema. */
+    geoSegments: z.array(geoSegmentSchema).optional(),
+    geoCities: z.array(z.string().min(1).max(64)).optional(),
     search: searchTargetingSchema.optional(),
     purchases: purchasesTargetingSchema.optional(),
     balance: balanceTargetingSchema.optional(),

@@ -841,3 +841,36 @@ describe('loadWalletDataForSelection', () => {
     });
   });
 });
+
+describe('IP-geo targeting (WS-2)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const geoPromo = makePromo({ id: 'geo-tourists', targeting: { geoSegments: ['tourist'] } });
+  const queue = () => fakeConfigService({ getQueue: async () => ({ promos: [geoPromo], persist: false }) });
+
+  it('passes params.geo down to the checker context (geo-targeted promo wins for a matching viewer)', async () => {
+    const result = await handleSelectPromo(
+      { userId: 'u1', geo: { segment: 'tourist', city: 'sochi' } },
+      deps({ configService: queue() }),
+    );
+    expect(result.status).toBe('ok');
+  });
+
+  it('filters a geo-targeted promo when the request carries no geo (fail-closed)', async () => {
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService: queue() }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('never writes geo into the selection trace row (privacy, v1)', async () => {
+    const rows: unknown[] = [];
+    const selectionTrace = { record: (row: unknown) => { rows.push(row); } };
+    await handleSelectPromo(
+      { userId: 'u1', geo: { segment: 'local', city: 'sukhum' } },
+      deps({ configService: queue(), selectionTrace: selectionTrace as never }),
+    );
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0])).not.toContain('sukhum');
+    expect(rows[0]).not.toHaveProperty('geo');
+  });
+});

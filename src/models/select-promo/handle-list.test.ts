@@ -182,3 +182,26 @@ describe('handleSelectPromoList', () => {
     if (inTelegram.status === 'ok') expect(inTelegram.steps.map((s) => s.id)).toEqual(['any', 'tg']);
   });
 });
+
+describe('IP-geo targeting (WS-2, list)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const geoPromo = makePromo({ id: 'geo-tourists', targeting: { geoSegments: ['tourist'] } });
+  const queue = () => fakeConfigService({ getQueue: async () => ({ promos: [geoPromo], persist: false }) });
+
+  it('passes params.geo down to the checkers (geo-targeted step included for a matching viewer)', async () => {
+    const result = await handleSelectPromoList(
+      { userId: 'u1', geo: { segment: 'tourist' } },
+      deps({ configService: queue() }),
+    );
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.steps.map((s) => s.id)).toEqual(['geo-tourists']);
+  });
+
+  it('filters a geo-targeted step when the request carries no geo (fail-closed)', async () => {
+    const result = await handleSelectPromoList({ userId: 'u1' }, deps({ configService: queue() }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+});

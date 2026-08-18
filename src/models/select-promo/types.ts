@@ -1,6 +1,6 @@
 /** Public request/response types for the select-promo model. */
 
-import type { Promo, PromoEnvSignal } from '../../promo-selector/types';
+import type { GeoSegment, Promo, PromoEnvSignal } from '../../promo-selector/types';
 import type { IdentityKind } from '../../promo-selector/checkers/Checker';
 export type { IdentityKind } from '../../promo-selector/checkers/Checker';
 
@@ -55,6 +55,12 @@ export interface SelectPromoParams {
    * fail-closed, остальные не затронуты (back-compat).
    */
   env?: PromoEnvSignal;
+  /**
+   * Viewer IP-geo от витрины (класс + слаг города, не сырой IP). Omitted =
+   * сигнала нет (back-compat): промо с гео-правилами fail-closed, остальные
+   * не затронуты.
+   */
+  geo?: { segment: GeoSegment; city?: string };
   /**
    * Promo ids to exclude from selection (dropped BEFORE the checkers run).
    * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past

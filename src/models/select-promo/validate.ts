@@ -17,6 +17,9 @@ const MAX_EXCLUDE_IDS = 50;
 const PROMO_OS_VALUES: readonly string[] = ['ios', 'android'];
 const PROMO_ENVIRONMENT_VALUES: readonly string[] = ['browser', 'telegram', 'pwa', 'app'];
 const DEVICE_BRAND_VALUES: readonly string[] = ['iphone', 'android-flagship', 'android-other'];
+/** Enum-значения params.geo.segment — зеркало GeoSegment (см. promo-selector/types). */
+const GEO_SEGMENTS = ['local', 'tourist', 'other'] as const;
+const MAX_GEO_CITY_LENGTH = 64;
 const MAX_EXCLUDE_ID_LENGTH = 64;
 const MAX_VIEWER_KEY_LENGTH = 128;
 
@@ -176,6 +179,27 @@ export function validateParams(params: unknown, opts: ValidationOptions = {}): V
       ...(e.brand !== undefined ? { brand: e.brand as PromoEnvSignal['brand'] } : {}),
     };
     if (Object.keys(env).length > 0) result.env = env;
+  }
+
+  if (p.geo !== undefined) {
+    if (typeof p.geo !== 'object' || p.geo === null || Array.isArray(p.geo)) {
+      return { ok: false, error: 'params.geo must be an object' };
+    }
+    const geo = p.geo as Record<string, unknown>;
+    if (!(GEO_SEGMENTS as readonly unknown[]).includes(geo.segment)) {
+      return { ok: false, error: "params.geo.segment must be 'local', 'tourist' or 'other'" };
+    }
+    if (geo.city !== undefined && (typeof geo.city !== 'string' || geo.city.length < 1 || geo.city.length > MAX_GEO_CITY_LENGTH)) {
+      return {
+        ok: false,
+        error: `params.geo.city must be a non-empty string of at most ${MAX_GEO_CITY_LENGTH} characters`,
+      };
+    }
+    // Канонический выход: только известные ключи (мусор дальше валидатора не идёт).
+    result.geo = {
+      segment: geo.segment as (typeof GEO_SEGMENTS)[number],
+      ...(typeof geo.city === 'string' ? { city: geo.city } : {}),
+    };
   }
 
   if (userObj !== null) {

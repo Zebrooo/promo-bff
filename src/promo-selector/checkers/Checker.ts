@@ -1,4 +1,4 @@
-import type { Promo, PromoEnvSignal, SubscriptionLevel } from '../types';
+import type { GeoSegment, Promo, PromoEnvSignal, SubscriptionLevel } from '../types';
 
 /** Stable identity source, independent from current login state. */
 export type IdentityKind = 'account' | 'anonymous';
@@ -19,6 +19,11 @@ export interface CheckContext {
   /** Env-сигнал (ОС/среда/класс устройства), вычисленный сайтом. Undefined = сигнала нет:
    *  промо с env-правилами тогда фейлится (fail-closed в EnvChecker), без правил — не затронуто. */
   env?: PromoEnvSignal;
+  /** Viewer's IP-geo segment, resolved by the storefront (never a raw IP). Undefined = не определилось:
+   *  промо с гео-правилами тогда фейлится (fail-closed в GeoChecker), без правил — не затронуто. */
+  geoSegment?: GeoSegment;
+  /** Viewer's IP-geo city slug (та же номенклатура, что profiles.city). Undefined = город не определился. */
+  geoCity?: string;
   /**
    * Acceptable creative formats for the requesting surface (e.g. ['topline'] for
    * the top banner, ['popup','fullscreen','inline','divkit'] for the overlay).

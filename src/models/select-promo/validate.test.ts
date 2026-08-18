@@ -306,3 +306,40 @@ describe('validateParams', () => {
     if (result.ok) expect(result.params.skipCheckers).toEqual(['env']);
   });
 });
+
+describe('params.geo (IP-geo, WS-2)', () => {
+  it('accepts a valid geo with and without city', () => {
+    for (const geo of [{ segment: 'tourist' }, { segment: 'local', city: 'gagra' }]) {
+      const result = validateParams({ userId: 'u1', geo });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.params.geo).toEqual(geo);
+    }
+  });
+
+  it('omits geo when absent (back-compat, no geo filtering)', () => {
+    const result = validateParams({ userId: 'u1' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.geo).toBeUndefined();
+  });
+
+  it('rejects garbage: non-object, unknown segment, bad city', () => {
+    expect(validateParams({ userId: 'u1', geo: 'tourist' }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', geo: ['tourist'] }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', geo: { segment: 'moon' } }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', geo: { city: 'sochi' } }).ok).toBe(false); // segment обязателен
+    expect(validateParams({ userId: 'u1', geo: { segment: 'local', city: '' } }).ok).toBe(false);
+    expect(validateParams({ userId: 'u1', geo: { segment: 'local', city: 'x'.repeat(65) } }).ok).toBe(false);
+  });
+
+  it('does not forward extra keys inside geo', () => {
+    const result = validateParams({ userId: 'u1', geo: { segment: 'other', junk: 1 } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.geo).toEqual({ segment: 'other' });
+  });
+
+  it("skipCheckers allowlist auto-includes 'geo'", () => {
+    const result = validateParams({ userId: 'u1', skipCheckers: ['geo'] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.skipCheckers).toEqual(['geo']);
+  });
+});
