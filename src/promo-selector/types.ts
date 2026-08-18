@@ -100,6 +100,18 @@ export interface PromoTargeting {
   };
 }
 
+/** Dayparting: показ только в выбранные дни недели и часы МОСКОВСКОГО времени
+ *  (фиксированный UTC+3, без tzdata). Отсутствие поля = показ 24/7 внутри
+ *  окна startsAt/endsAt. */
+export interface PromoSchedule {
+  /** ISO-нумерация: 1=Пн … 7=Вс. Непустой, без дублей. */
+  daysOfWeek: number[];
+  /** 0..23, включительно, часы МСК. */
+  hourStart: number;
+  /** 1..24, исключающая граница; 24 = до полуночи. */
+  hourEnd: number;
+}
+
 /**
  * A promo as stored in the S3 pool (promos.json). Queue membership/order lives in
  * queue-<name>.json, not by position here; a promo carries its own targeting, show window
@@ -111,6 +123,8 @@ export interface Promo {
   /** Show window, ISO-8601 timestamps. */
   startsAt: string;
   endsAt: string;
+  /** Dayparting поверх окна дат (см. PromoSchedule). Omitted = 24/7. */
+  schedule?: PromoSchedule;
   targeting: PromoTargeting;
   /** Max times one user may see this promo. Omitted = unlimited (limit checker skipped). */
   maxImpressionsPerUser?: number;

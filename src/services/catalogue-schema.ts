@@ -48,12 +48,25 @@ export const listingsTargetingSchema = z.object({
   inactiveDays: z.number().int().nonnegative().optional(),
 });
 
+/** Dayparting-блок (спека targeting-schedule §3). Зеркалит scheduleSchema
+ *  кабинета, но с .catch(undefined) на месте использования — кривое
+ *  ОПЦИОНАЛЬНОЕ поле не должно ронять всё промо в parsePoolLeniently
+ *  (намеренная асимметрия: кабинет строгий, BFF снисходительный, fail-open). */
+export const scheduleSchema = z.object({
+  daysOfWeek: z.array(z.number().int().min(1).max(7))
+    .min(1)
+    .refine((d) => new Set(d).size === d.length),
+  hourStart: z.number().int().min(0).max(23),
+  hourEnd: z.number().int().min(1).max(24),
+}).refine((s) => s.hourStart < s.hourEnd);
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
+  schedule: scheduleSchema.optional().catch(undefined),
   targeting: z.object({
     minAge: z.number().int().nonnegative().optional(),
     maxAge: z.number().int().nonnegative().optional(),

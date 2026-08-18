@@ -874,3 +874,20 @@ describe('IP-geo targeting (WS-2)', () => {
     expect(rows[0]).not.toHaveProperty('geo');
   });
 });
+
+describe('dayparting schedule (WS-3)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('strips schedule from the Advertisement (server-only selection field)', async () => {
+    const promo = makePromo({
+      id: 'sched-1',
+      schedule: { daysOfWeek: [1, 2, 3, 4, 5, 6, 7], hourStart: 0, hourEnd: 24 },
+    });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result.status).toBe('ok');
+    expect((result as Extract<typeof result, { status: 'ok' }>).data).not.toHaveProperty('schedule');
+  });
+});

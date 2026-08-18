@@ -172,7 +172,7 @@ export async function loadWalletDataForSelection(
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, audience, sections, categories, sellerStatus, ...ad } = promo;
   return ad;
 }
 

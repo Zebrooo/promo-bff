@@ -148,7 +148,7 @@ describe('selectPromo trace (onTrace)', () => {
     expect(trace.candidates.map((c) => c.promoId)).toEqual(['old', 'ok']);
     // 'old' fails the date checker first → later checkers never ran for it.
     expect(trace.candidates[0].checks).toEqual([
-      { checker: 'date', outcome: 'fail', reason: 'now is within [startsAt, endsAt]' },
+      { checker: 'date', outcome: 'fail', reason: 'now is within [startsAt, endsAt] and MSK time matches schedule' },
     ]);
   });
 
