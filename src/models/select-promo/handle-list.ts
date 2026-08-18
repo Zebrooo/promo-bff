@@ -1,6 +1,7 @@
 import type { Promo } from '../../promo-selector/types';
 import { selectPromoList, type SelectionTrace } from '../../promo-selector';
 import {
+  loadBehaviorForSelection,
   loadSearchHistoryForSelection,
   loadWalletDataForSelection,
   stripToAdvertisement,
@@ -45,8 +46,13 @@ export async function handleSelectPromoList(
   // chain always dropped (order = queue index). Persist queues auto-skip limit+cooldown
   // (as select-promo does); on replay the route adds ['limit','cooldown'] via skipCheckers.
   const skip = [...(params.skipCheckers ?? []), 'chain', ...(persist ? ['limit', 'cooldown'] : [])];
-  const searchHistory = await loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo-list');
-  const wallet = await loadWalletDataForSelection(params, promos, skip, deps, 'select-promo-list');
+  // Параллельно, как в handleSelectPromo: три опциональные загрузки не должны
+  // складываться последовательно внутри бюджета сайта 800 мс.
+  const [searchHistory, wallet, behavior] = await Promise.all([
+    loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo-list'),
+    loadWalletDataForSelection(params, promos, skip, deps, 'select-promo-list'),
+    loadBehaviorForSelection(params, promos, skip, deps, 'select-promo-list'),
+  ]);
 
   let steps: Promo[];
   let trace: SelectionTrace | undefined;
@@ -67,6 +73,8 @@ export async function handleSelectPromoList(
         formats: params.formats,
         excludeIds: params.excludeIds,
         searchHistory,
+        behavior,
+        sessionViews: params.sessionViews,
         purchases: wallet.purchases,
         walletBalanceKopecks: wallet.walletBalanceKopecks,
         walletBalanceUnavailable: wallet.walletBalanceUnavailable,

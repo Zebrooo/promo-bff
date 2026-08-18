@@ -22,6 +22,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   searchHistoryService: { getSearchHistory: async () => [] },
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
   balanceService: { getBalances: async () => new Map() },
+  behaviorSignalService: { getSignal: async () => ({ interests: [], phoneViews7d: 0 }) },
   ...over,
 });
 

@@ -4,6 +4,7 @@ import {
   Checker,
   loadSuppliers,
   WEB_CHECKERS,
+  type BehaviorSignal,
   type CheckContext,
   type Logger,
   type PurchaseEntry,
@@ -69,6 +70,10 @@ export interface SelectPromoContext {
   excludeIds?: string[];
   /** Search rows preloaded once by the model handler. */
   searchHistory?: SearchHistoryEntry[];
+  /** Поведенческий сигнал, преднагруженный model handler'ом. undefined = не загружали/не смогли. */
+  behavior?: BehaviorSignal;
+  /** Карточек за текущий визит (из params сайта). */
+  sessionViews?: number;
   /** Purchase history preloaded once by the model handler. */
   purchases?: PurchaseEntry[];
   /** Current wallet balance, preloaded once by the model handler. */
@@ -151,6 +156,8 @@ async function evaluateCandidate(
     geoCity: ctx.geo?.city,
     formats: ctx.formats,
     searchHistory: ctx.searchHistory,
+    behavior: ctx.behavior,
+    sessionViews: ctx.sessionViews,
     purchases: ctx.purchases,
     walletBalanceKopecks: ctx.walletBalanceKopecks,
     walletBalanceUnavailable: ctx.walletBalanceUnavailable,

@@ -43,6 +43,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   searchHistoryService: { getSearchHistory: async () => [] },
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
   balanceService: { getBalances: async () => new Map() },
+  behaviorSignalService: { getSignal: async () => ({ interests: [], phoneViews7d: 0 }) },
   ...over,
 });
 
@@ -927,5 +928,162 @@ describe('visit-profile targeting (WS-4)', () => {
     const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService: queueOf([gated, open]) }));
     expect(result.status).toBe('ok');
     if (result.status === 'ok') expect(result.data.id).toBe('open');
+  });
+});
+
+describe('handleSelectPromo behavior signal (wave B)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  const behaviorPromo = () =>
+    makePromo({ id: 'bhv-1', targeting: { behavior: { interest: { categories: ['shiny'] } } } });
+
+  it('does not request the signal when no queued promo has an interest/hot-buyer rule', async () => {
+    const getSignal = vi.fn(async () => ({ interests: [], phoneViews7d: 0 }));
+    // engagement-only промо БД не требует — сигнал тоже не запрашивается
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [makePromo({ targeting: { behavior: { minSessionViews: 2 } } })], persist: false }),
+    });
+    await handleSelectPromo(
+      { userId: 'u1', viewerKey: 's:abc', sessionViews: 3 },
+      deps({ configService, behaviorSignalService: { getSignal } }),
+    );
+    expect(getSignal).not.toHaveBeenCalled();
+  });
+
+  it('does not request the signal without a viewerKey (аноним на read-only рендере)', async () => {
+    const getSignal = vi.fn(async () => ({ interests: [], phoneViews7d: 0 }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
+    });
+    await handleSelectPromo({ userId: 'u1' }, deps({ configService, behaviorSignalService: { getSignal } }));
+    expect(getSignal).not.toHaveBeenCalled();
+  });
+
+  it('does not request the signal when both behavior checkers are skipped', async () => {
+    const getSignal = vi.fn(async () => ({ interests: [], phoneViews7d: 0 }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
+    });
+    await handleSelectPromo(
+      { userId: 'u1', viewerKey: 's:abc', skipCheckers: ['interest', 'hot-buyer'] },
+      deps({ configService, behaviorSignalService: { getSignal } }),
+    );
+    expect(getSignal).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic candidate when the signal service fails (targeted промо fail closed)', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [behaviorPromo(), makePromo({ id: 'generic-1' })], persist: false }),
+    });
+    const behaviorSignalService = { getSignal: vi.fn(async (): Promise<never> => { throw new Error('rpc down'); }) };
+    const result = await handleSelectPromo(
+      { userId: 'u1', viewerKey: 's:abc' },
+      deps({ configService, behaviorSignalService }),
+    );
+    expect(result.status).toBe('ok');
+    expect((result as { data: { id: string } }).data.id).toBe('generic-1');
+  });
+
+  it('selects the behavior-targeted promo when the signal matches (anonymous → без p_user_id)', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
+    });
+    const behaviorSignalService = {
+      getSignal: vi.fn(async () => ({
+        interests: [{ category: 'shiny', lastViewedAt: new Date().toISOString() }],
+        phoneViews7d: 0,
+      })),
+    };
+    const result = await handleSelectPromo(
+      { userId: 'u1', viewerKey: 's:abc' },
+      deps({ configService, behaviorSignalService }),
+    );
+    expect(result.status).toBe('ok');
+    expect(behaviorSignalService.getSignal).toHaveBeenCalledWith('s:abc', undefined);
+  });
+
+  it('passes the account userId to the signal service for a proven account identity', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
+    });
+    const behaviorSignalService = { getSignal: vi.fn(async () => ({ interests: [], phoneViews7d: 5 })) };
+    await handleSelectPromo(
+      { userId: 'u-acc', viewerKey: 's:k', user: { isAuthorized: true, identityKind: 'account' } },
+      deps({ configService, behaviorSignalService }),
+    );
+    expect(behaviorSignalService.getSignal).toHaveBeenCalledWith('s:k', 'u-acc');
+  });
+
+  it('hot-buyer промо проходит по phoneViews7d, engagement — по params.sessionViews', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [makePromo({
+          id: 'hot-engaged',
+          targeting: { behavior: { hotBuyer: { minPhoneViews: 2 }, minSessionViews: 3 } },
+        })],
+        persist: false,
+      }),
+    });
+    const behaviorSignalService = { getSignal: async () => ({ interests: [], phoneViews7d: 2 }) };
+    const passing = await handleSelectPromo(
+      { userId: 'u2', viewerKey: 's:abc', sessionViews: 3 },
+      deps({ configService, behaviorSignalService }),
+    );
+    expect(passing.status).toBe('ok');
+    // Без sessionViews engagement fail closed — промо пропускается.
+    const noSession = await handleSelectPromo(
+      { userId: 'u2', viewerKey: 's:abc' },
+      deps({ configService, behaviorSignalService }),
+    );
+    expect(noSession.status).toBe('skipped');
+  });
+});
+
+describe('handleSelectPromo lifecycle gate (wave B)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('shows the promo only to a matching seller and never leaks lifecycle to the client', async () => {
+    const promo = makePromo({ id: 'lc-1', lifecycle: { soldWithinDays: 14 } });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const recentlySold = await handleSelectPromo(
+      { userId: 'lc-s1', user: { authenticated: true } },
+      deps({
+        configService,
+        listingService: fakeListingService({
+          getListingStats: async () => makeListingStats(0, {
+            lastSoldAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+          }).listingStats,
+        }),
+      }),
+    );
+    expect(recentlySold.status).toBe('ok');
+    if (recentlySold.status === 'ok') {
+      expect(recentlySold.data).not.toHaveProperty('lifecycle'); // server-only
+      expect(recentlySold.data.id).toBe('lc-1');
+    }
+
+    // Fail-soft путь: RPC ещё не применён → lifecycle-поля undefined → skip.
+    const neverSold = await handleSelectPromo(
+      { userId: 'lc-b1', user: { authenticated: true } },
+      deps({
+        configService,
+        listingService: fakeListingService({ getListingStats: async () => makeListingStats(0).listingStats }),
+      }),
+    );
+    expect(neverSold.status).toBe('skipped');
+
+    // Аноним не проходит lifecycle-гейт никогда (fail closed).
+    const anonymous = await handleSelectPromo({ userId: 'lc-anon-1' }, deps({ configService }));
+    expect(anonymous.status).toBe('skipped');
+  });
+
+  it('a promo without lifecycle is untouched (back-compat)', async () => {
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [makePromo({ id: 'plain' })], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'lc-plain-1' }, deps({ configService }));
+    expect(result.status).toBe('ok');
   });
 });

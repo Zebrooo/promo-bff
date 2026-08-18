@@ -23,6 +23,8 @@ const MAX_GEO_CITY_LENGTH = 64;
 /** Enum-значения params.visit.source — зеркало EntrySource (см. promo-selector/types). */
 const ENTRY_SOURCES = ['direct', 'search', 'telegram', 'other'] as const;
 const MAX_VISIT_DAY_COUNT = 10_000;
+/** Потолок params.sessionViews (сайт сам капит куку сотней; запас — защита от мусора). */
+const MAX_SESSION_VIEWS = 10_000;
 const MAX_EXCLUDE_ID_LENGTH = 64;
 const MAX_VIEWER_KEY_LENGTH = 128;
 
@@ -226,6 +228,18 @@ export function validateParams(params: unknown, opts: ValidationOptions = {}): V
       ...(v.visitDays !== undefined ? { visitDays: v.visitDays as number } : {}),
     };
     if (Object.keys(visit).length > 0) result.visit = visit;
+  }
+
+  if (p.sessionViews !== undefined) {
+    if (
+      typeof p.sessionViews !== 'number' ||
+      !Number.isInteger(p.sessionViews) ||
+      p.sessionViews < 0 ||
+      p.sessionViews > MAX_SESSION_VIEWS
+    ) {
+      return { ok: false, error: `params.sessionViews must be an integer between 0 and ${MAX_SESSION_VIEWS}` };
+    }
+    result.sessionViews = p.sessionViews;
   }
 
   if (userObj !== null) {

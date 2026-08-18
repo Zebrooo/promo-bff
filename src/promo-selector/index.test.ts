@@ -241,7 +241,8 @@ describe('selectPromo env targeting', () => {
   it("checker order: 'env' стоит сразу после 'device' (Date → … → Device → Env → Format → …)", () => {
     expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
       'date', 'targeting', 'geo', 'audience', 'visitor', 'source', 'context', 'search', 'purchases', 'balance',
-      'device', 'env', 'format', 'seller', 'listings', 'limit', 'cooldown', 'chain',
+      'interest', 'hot-buyer', 'engagement',
+      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'limit', 'cooldown', 'chain',
     ]);
   });
 

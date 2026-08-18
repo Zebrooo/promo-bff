@@ -75,6 +75,12 @@ export interface SelectPromoParams {
    */
   visit?: SelectPromoVisit;
   /**
+   * Карточек объявлений, открытых зрителем за ТЕКУЩИЙ визит (кука aa_sess_views
+   * сайта; перерыв > 30 минут = новый визит). Питает EngagementChecker.
+   * Omitted = неизвестно → engagement-промо fail closed.
+   */
+  sessionViews?: number;
+  /**
    * Promo ids to exclude from selection (dropped BEFORE the checkers run).
    * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past
    * promos it already showed this session without waiting for the impression
@@ -108,7 +114,7 @@ export function resolveUserIdentity(user?: SelectPromoUser): {
  */
 export type Advertisement = Omit<
   Promo,
-  'name' | 'startsAt' | 'endsAt' | 'schedule' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'audience' | 'sections' | 'categories' | 'sellerStatus' | 'entrySources'
+  'name' | 'startsAt' | 'endsAt' | 'schedule' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'audience' | 'sections' | 'categories' | 'sellerStatus' | 'lifecycle' | 'entrySources'
 >;
 
 /**

@@ -9,17 +9,21 @@ import { ContextChecker } from './registry/Context';
 import { SearchChecker } from './registry/Search';
 import { PurchaseChecker } from './registry/Purchases';
 import { BalanceChecker } from './registry/Balance';
+import { InterestChecker } from './registry/Interest';
+import { HotBuyerChecker } from './registry/HotBuyer';
+import { EngagementChecker } from './registry/Engagement';
 import { DeviceChecker } from './registry/Device';
 import { EnvChecker } from './registry/Env';
 import { FormatChecker } from './registry/Format';
 import { SellerChecker } from './registry/Seller';
+import { LifecycleChecker } from './registry/Lifecycle';
 import { ListingsChecker } from './registry/Listings';
 import { LimitChecker, CooldownChecker } from './registry/Frequency';
 import { ChainChecker } from './registry/Chain';
 
 export { Checker } from './Checker';
 export type { CheckContext, SupplierId, SuppliersData, UserData, Logger } from './Checker';
-export type { SearchHistoryEntry, PurchaseEntry } from './Checker';
+export type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal } from './Checker';
 export { loadSuppliers, type SupplierDeps } from './suppliers';
 
 /** Web checker collection, in evaluation order. */
@@ -34,10 +38,14 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new SearchChecker(),
   new PurchaseChecker(),
   new BalanceChecker(),
+  new InterestChecker(),
+  new HotBuyerChecker(),
+  new EngagementChecker(),
   new DeviceChecker(),
   new EnvChecker(),
   new FormatChecker(),
   new SellerChecker(),
+  new LifecycleChecker(),
   new ListingsChecker(),
   new LimitChecker(),
   new CooldownChecker(),
