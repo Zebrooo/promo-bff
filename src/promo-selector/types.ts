@@ -94,6 +94,21 @@ export interface PromoTargeting {
     /** Window for movement checks. Omitted = all-time (since account creation). */
     movementLookbackDays?: number;
   };
+  /** Поведенческий гейт: интересы/горячий покупатель/вовлечённость визита.
+   *  Между условиями — AND (как между чекерами), внутри categories — OR.
+   *  Omitted/empty = no behavior targeting. */
+  behavior?: {
+    /** Смотрел объявления этих категорий (slug'и categories сайта) за lookbackDays. */
+    interest?: {
+      categories?: string[];
+      /** 1..14: потолок = окно RPC promo_viewer_behavior. Дефолт чекера 7. */
+      lookbackDays?: number;
+    };
+    /** Открывал телефоны ≥ minPhoneViews РАЗНЫХ объявлений за 7 дней (окно фикс. в RPC). */
+    hotBuyer?: { minPhoneViews?: number };
+    /** Показывать только после N открытых карточек за текущий визит. */
+    minSessionViews?: number;
+  };
   /** Own-listings gate: categories/active-categories/upsell/reactivation. Omitted/empty means no listings targeting. */
   listings?: {
     /** Ever listed (any status) in one of these category slugs. */
@@ -107,6 +122,22 @@ export interface PromoTargeting {
     /** Minimum days since the user's most recent listing (any status). */
     inactiveDays?: number;
   };
+}
+
+/**
+ * Таргетинг по стадии жизненного цикла СОБСТВЕННЫХ объявлений зрителя
+ * (LifecycleChecker). Все заданные условия объединяются по И; нужен «ИЛИ» —
+ * заводится два промо. Server-only: клиенту не отдаётся (stripToAdvertisement).
+ */
+export interface PromoLifecycle {
+  /** (а) Есть АКТИВНОЕ объявление хотя бы в одной из категорий (slug'и, ≥1). */
+  activeInCategories?: string[];
+  /** (б) Перевёл объявление в sold за последние N дней (1..90). */
+  soldWithinDays?: number;
+  /** (в) Есть активное 30+ дней с малым числом просмотров (пороги — константы BFF). */
+  hasStalledActive?: true;
+  /** (г) Ровно одно объявление за всю историю, и оно свежее N дней (1..30). */
+  firstListingWithinDays?: number;
 }
 
 /** Dayparting: показ только в выбранные дни недели и часы МОСКОВСКОГО времени
@@ -205,6 +236,9 @@ export interface Promo {
   audience?: 'all' | 'authenticated' | 'anonymous';
   /** Restrict to sellers (has active listings) or buyers (none). Omitted = either. */
   sellerStatus?: 'seller' | 'buyer';
+  /** Таргетинг по стадии жизненного цикла собственных объявлений зрителя
+   *  (LifecycleChecker). Server-only: клиенту не отдаётся. Omitted = гейта нет. */
+  lifecycle?: PromoLifecycle;
   /** Device gate: 'desktop'/'touch' restricts to that device; 'both'/omitted = any.
    *  Enforced by the DeviceChecker against the request's `device`. */
   deviceTarget?: 'desktop' | 'touch' | 'both';
