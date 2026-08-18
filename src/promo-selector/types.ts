@@ -25,6 +25,12 @@ export interface PromoEnvSignal {
   brand?: DeviceBrand;
 }
 
+/** IP-гео сегмент «где пользователь СЕЙЧАС», разрезолвленный сайтом (не сырой IP). */
+export type GeoSegment = 'local' | 'tourist' | 'other';
+
+/** Класс источника захода текущей сессии (aa_src, свёрнут сайтом до 4 значений). */
+export type EntrySource = 'direct' | 'search' | 'telegram' | 'other';
+
 export interface ImageFocalPoint {
   /** Horizontal coordinate in basis points: 0 = left, 10_000 = right. */
   xBp: number;
@@ -45,6 +51,16 @@ export interface PromoTargeting {
   environments?: PromoEnvironment[];
   /** Allowed device-brand classes (платёжеспособность-прокси по UA); empty/omitted = any. */
   deviceBrands?: DeviceBrand[];
+  /** IP-гео: допустимые сегменты «где сейчас». Пусто/нет = любой. НЕ regions: та ось — город из ПРОФИЛЯ. */
+  geoSegments?: GeoSegment[];
+  /** IP-гео: допустимые города (слаги, та же номенклатура, что profiles.city). Пусто/нет = любой. */
+  geoCities?: string[];
+  /** 'newcomer' | 'regular'; нет поля = любой посетитель (VisitorChecker скипается). */
+  visitorClass?: 'newcomer' | 'regular';
+  /** Только при visitorClass='newcomer'; дефолт 7 (DEFAULT_NEWCOMER_MAX_AGE_DAYS). */
+  newcomerMaxAgeDays?: number;
+  /** Только при visitorClass='regular'; дефолт 5 (DEFAULT_REGULAR_MIN_VISIT_DAYS). */
+  regularMinVisitDays?: number;
   /** Search-history gate. Omitted/empty means no search targeting. */
   search?: {
     /** Normalized phrases to find in past search queries. */
@@ -93,6 +109,18 @@ export interface PromoTargeting {
   };
 }
 
+/** Dayparting: показ только в выбранные дни недели и часы МОСКОВСКОГО времени
+ *  (фиксированный UTC+3, без tzdata). Отсутствие поля = показ 24/7 внутри
+ *  окна startsAt/endsAt. */
+export interface PromoSchedule {
+  /** ISO-нумерация: 1=Пн … 7=Вс. Непустой, без дублей. */
+  daysOfWeek: number[];
+  /** 0..23, включительно, часы МСК. */
+  hourStart: number;
+  /** 1..24, исключающая граница; 24 = до полуночи. */
+  hourEnd: number;
+}
+
 /**
  * A promo as stored in the S3 pool (promos.json). Queue membership/order lives in
  * queue-<name>.json, not by position here; a promo carries its own targeting, show window
@@ -104,6 +132,8 @@ export interface Promo {
   /** Show window, ISO-8601 timestamps. */
   startsAt: string;
   endsAt: string;
+  /** Dayparting поверх окна дат (см. PromoSchedule). Omitted = 24/7. */
+  schedule?: PromoSchedule;
   targeting: PromoTargeting;
   /** Max times one user may see this promo. Omitted = unlimited (limit checker skipped). */
   maxImpressionsPerUser?: number;
@@ -178,4 +208,7 @@ export interface Promo {
   /** Device gate: 'desktop'/'touch' restricts to that device; 'both'/omitted = any.
    *  Enforced by the DeviceChecker against the request's `device`. */
   deviceTarget?: 'desktop' | 'touch' | 'both';
+  /** Классы источника захода, при которых промо можно показывать (SourceChecker).
+   *  Подмножество 4 классов; нет/пусто = любой источник (чекер скипается). */
+  entrySources?: EntrySource[];
 }

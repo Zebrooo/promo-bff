@@ -1,5 +1,5 @@
 import { WEB_CHECKERS } from '../../promo-selector/checkers';
-import type { SelectPromoParams } from './types';
+import type { SelectPromoParams, SelectPromoVisit } from './types';
 import type { PromoEnvSignal } from '../../promo-selector/types';
 
 /**
@@ -17,6 +17,12 @@ const MAX_EXCLUDE_IDS = 50;
 const PROMO_OS_VALUES: readonly string[] = ['ios', 'android'];
 const PROMO_ENVIRONMENT_VALUES: readonly string[] = ['browser', 'telegram', 'pwa', 'app'];
 const DEVICE_BRAND_VALUES: readonly string[] = ['iphone', 'android-flagship', 'android-other'];
+/** Enum-значения params.geo.segment — зеркало GeoSegment (см. promo-selector/types). */
+const GEO_SEGMENTS = ['local', 'tourist', 'other'] as const;
+const MAX_GEO_CITY_LENGTH = 64;
+/** Enum-значения params.visit.source — зеркало EntrySource (см. promo-selector/types). */
+const ENTRY_SOURCES = ['direct', 'search', 'telegram', 'other'] as const;
+const MAX_VISIT_DAY_COUNT = 10_000;
 const MAX_EXCLUDE_ID_LENGTH = 64;
 const MAX_VIEWER_KEY_LENGTH = 128;
 
@@ -176,6 +182,50 @@ export function validateParams(params: unknown, opts: ValidationOptions = {}): V
       ...(e.brand !== undefined ? { brand: e.brand as PromoEnvSignal['brand'] } : {}),
     };
     if (Object.keys(env).length > 0) result.env = env;
+  }
+
+  if (p.geo !== undefined) {
+    if (typeof p.geo !== 'object' || p.geo === null || Array.isArray(p.geo)) {
+      return { ok: false, error: 'params.geo must be an object' };
+    }
+    const geo = p.geo as Record<string, unknown>;
+    if (!(GEO_SEGMENTS as readonly unknown[]).includes(geo.segment)) {
+      return { ok: false, error: "params.geo.segment must be 'local', 'tourist' or 'other'" };
+    }
+    if (geo.city !== undefined && (typeof geo.city !== 'string' || geo.city.length < 1 || geo.city.length > MAX_GEO_CITY_LENGTH)) {
+      return {
+        ok: false,
+        error: `params.geo.city must be a non-empty string of at most ${MAX_GEO_CITY_LENGTH} characters`,
+      };
+    }
+    // Канонический выход: только известные ключи (мусор дальше валидатора не идёт).
+    result.geo = {
+      segment: geo.segment as (typeof GEO_SEGMENTS)[number],
+      ...(typeof geo.city === 'string' ? { city: geo.city } : {}),
+    };
+  }
+
+  if (p.visit !== undefined) {
+    if (typeof p.visit !== 'object' || p.visit === null || Array.isArray(p.visit)) {
+      return { ok: false, error: 'params.visit must be an object' };
+    }
+    const v = p.visit as Record<string, unknown>;
+    if (v.source !== undefined && !(ENTRY_SOURCES as readonly unknown[]).includes(v.source)) {
+      return { ok: false, error: "params.visit.source must be one of 'direct', 'search', 'telegram', 'other'" };
+    }
+    for (const key of ['firstSeenDaysAgo', 'visitDays'] as const) {
+      const n = v[key];
+      if (n !== undefined && (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_VISIT_DAY_COUNT)) {
+        return { ok: false, error: `params.visit.${key} must be an integer in 0..${MAX_VISIT_DAY_COUNT}` };
+      }
+    }
+    // Канонический выход: чужие ключи не пропускаем (как у user); пустой объект опускаем.
+    const visit: SelectPromoVisit = {
+      ...(v.source !== undefined ? { source: v.source as SelectPromoVisit['source'] } : {}),
+      ...(v.firstSeenDaysAgo !== undefined ? { firstSeenDaysAgo: v.firstSeenDaysAgo as number } : {}),
+      ...(v.visitDays !== undefined ? { visitDays: v.visitDays as number } : {}),
+    };
+    if (Object.keys(visit).length > 0) result.visit = visit;
   }
 
   if (userObj !== null) {

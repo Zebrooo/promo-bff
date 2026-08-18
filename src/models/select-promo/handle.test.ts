@@ -841,3 +841,91 @@ describe('loadWalletDataForSelection', () => {
     });
   });
 });
+
+describe('IP-geo targeting (WS-2)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const geoPromo = makePromo({ id: 'geo-tourists', targeting: { geoSegments: ['tourist'] } });
+  const queue = () => fakeConfigService({ getQueue: async () => ({ promos: [geoPromo], persist: false }) });
+
+  it('passes params.geo down to the checker context (geo-targeted promo wins for a matching viewer)', async () => {
+    const result = await handleSelectPromo(
+      { userId: 'u1', geo: { segment: 'tourist', city: 'sochi' } },
+      deps({ configService: queue() }),
+    );
+    expect(result.status).toBe('ok');
+  });
+
+  it('filters a geo-targeted promo when the request carries no geo (fail-closed)', async () => {
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService: queue() }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('never writes geo into the selection trace row (privacy, v1)', async () => {
+    const rows: unknown[] = [];
+    const selectionTrace = { record: (row: unknown) => { rows.push(row); } };
+    await handleSelectPromo(
+      { userId: 'u1', geo: { segment: 'local', city: 'sukhum' } },
+      deps({ configService: queue(), selectionTrace: selectionTrace as never }),
+    );
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0])).not.toContain('sukhum');
+    expect(rows[0]).not.toHaveProperty('geo');
+  });
+});
+
+describe('dayparting schedule (WS-3)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('strips schedule from the Advertisement (server-only selection field)', async () => {
+    const promo = makePromo({
+      id: 'sched-1',
+      schedule: { daysOfWeek: [1, 2, 3, 4, 5, 6, 7], hourStart: 0, hourEnd: 24 },
+    });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result.status).toBe('ok');
+    expect((result as Extract<typeof result, { status: 'ok' }>).data).not.toHaveProperty('schedule');
+  });
+});
+
+describe('visit-profile targeting (WS-4)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const queueOf = (promos: ReturnType<typeof makePromo>[]) =>
+    fakeConfigService({ getQueue: async () => ({ promos, persist: false }) });
+
+  it('strips entrySources (and the new targeting) from the Advertisement', async () => {
+    const promo = makePromo({ entrySources: ['telegram'], targeting: { visitorClass: 'regular' } });
+    const result = await handleSelectPromo(
+      { userId: 'u1', visit: { source: 'telegram', visitDays: 9 } },
+      deps({ configService: queueOf([promo]) }),
+    );
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.data).not.toHaveProperty('entrySources');
+      expect(result.data).not.toHaveProperty('targeting');
+    }
+  });
+
+  it('visit reaches the checkers: source mismatch filters the promo', async () => {
+    const promo = makePromo({ entrySources: ['search'] });
+    const result = await handleSelectPromo(
+      { userId: 'u1', visit: { source: 'telegram' } },
+      deps({ configService: queueOf([promo]) }),
+    );
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+
+  it('no visit at all: source-gated promo fails closed, untargeted promo wins', async () => {
+    const gated = makePromo({ id: 'gated', entrySources: ['telegram'] });
+    const open = makePromo({ id: 'open' });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService: queueOf([gated, open]) }));
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.data.id).toBe('open');
+  });
+});

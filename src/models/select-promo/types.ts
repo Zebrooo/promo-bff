@@ -1,6 +1,6 @@
 /** Public request/response types for the select-promo model. */
 
-import type { Promo, PromoEnvSignal } from '../../promo-selector/types';
+import type { EntrySource, GeoSegment, Promo, PromoEnvSignal } from '../../promo-selector/types';
 import type { IdentityKind } from '../../promo-selector/checkers/Checker';
 export type { IdentityKind } from '../../promo-selector/checkers/Checker';
 
@@ -17,6 +17,13 @@ export interface SelectPromoUser {
   identityProof?: string;
   /** @deprecated Input alias for isAuthorized. */
   authenticated?: boolean;
+}
+
+/** Сигналы профиля визита; сайт шлёт объект только когда есть хоть один сигнал. */
+export interface SelectPromoVisit {
+  source?: EntrySource;
+  firstSeenDaysAgo?: number;
+  visitDays?: number;
 }
 
 export interface SelectPromoParams {
@@ -56,6 +63,18 @@ export interface SelectPromoParams {
    */
   env?: PromoEnvSignal;
   /**
+   * Viewer IP-geo от витрины (класс + слаг города, не сырой IP). Omitted =
+   * сигнала нет (back-compat): промо с гео-правилами fail-closed, остальные
+   * не затронуты.
+   */
+  geo?: { segment: GeoSegment; city?: string };
+  /**
+   * Профиль визита от витрины (класс источника + два малых целых; полный
+   * referrer сюда не доезжает — приватность). Omitted = сигнала нет
+   * (back-compat): промо с visitor/source-правилами fail-closed.
+   */
+  visit?: SelectPromoVisit;
+  /**
    * Promo ids to exclude from selection (dropped BEFORE the checkers run).
    * Lets a sequential consumer (e.g. the cabinet-onboarding tour) advance past
    * promos it already showed this session without waiting for the impression
@@ -89,7 +108,7 @@ export function resolveUserIdentity(user?: SelectPromoUser): {
  */
 export type Advertisement = Omit<
   Promo,
-  'name' | 'startsAt' | 'endsAt' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'audience' | 'sections' | 'categories' | 'sellerStatus'
+  'name' | 'startsAt' | 'endsAt' | 'schedule' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'audience' | 'sections' | 'categories' | 'sellerStatus' | 'entrySources'
 >;
 
 /**

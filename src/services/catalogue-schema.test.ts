@@ -394,3 +394,90 @@ describe('promoSchema — env-таргетинг (os/environments/deviceBrands)'
     expect(rejected[0].promoId).toBe('broken');
   });
 });
+
+describe('promoSchema — targeting geo fields (IP-geo, WS-2)', () => {
+  it('parses geoSegments + geoCities and round-trips them', () => {
+    const parsed = promoSchema.parse(makePromo({
+      targeting: { geoSegments: ['local', 'tourist'], geoCities: ['sukhum', 'sochi'] } as never,
+    }));
+    expect(parsed.targeting.geoSegments).toEqual(['local', 'tourist']);
+    expect(parsed.targeting.geoCities).toEqual(['sukhum', 'sochi']);
+  });
+
+  it('rejects an unknown segment and an empty/oversized city slug', () => {
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoSegments: ['moon'] } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoCities: [''] } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { geoCities: ['x'.repeat(65)] } as never })).success).toBe(false);
+  });
+
+  it('old JSON without geo fields parses byte-for-byte as before (regression)', () => {
+    const parsed = promoSchema.parse(makePromo());
+    expect(parsed.targeting).not.toHaveProperty('geoSegments');
+    expect(parsed.targeting).not.toHaveProperty('geoCities');
+  });
+});
+
+describe('promoSchema — schedule (dayparting, WS-3)', () => {
+  const valid = { daysOfWeek: [1, 2, 3, 4, 5], hourStart: 9, hourEnd: 18 };
+
+  it('parses and keeps a valid schedule', () => {
+    const parsed = promoSchema.parse(makePromo({ schedule: valid } as never));
+    expect(parsed.schedule).toEqual(valid);
+  });
+
+  it('a promo without schedule still parses (back-compat)', () => {
+    expect(promoSchema.parse(makePromo()).schedule).toBeUndefined();
+  });
+
+  it('broken schedule is dropped to undefined, promo survives (fail-open, not rejected)', () => {
+    const broken = [
+      { daysOfWeek: [], hourStart: 0, hourEnd: 24 },     // пустые дни
+      { daysOfWeek: [1], hourStart: 9, hourEnd: 25 },    // 25-й час
+      { daysOfWeek: [1], hourStart: 18, hourEnd: 9 },    // start >= end
+      { daysOfWeek: [1, 1], hourStart: 9, hourEnd: 18 }, // дубли
+      'will-fix-later',                                  // не объект
+    ];
+    for (const schedule of broken) {
+      const { promos, rejected } = parsePoolLeniently([makePromo({ schedule: schedule as never })]);
+      expect(rejected).toEqual([]);
+      expect(promos).toHaveLength(1);
+      expect(promos[0].schedule).toBeUndefined();
+    }
+  });
+});
+
+describe('promoSchema — visit-profile targeting fields (WS-4)', () => {
+  it('accepts visitorClass with thresholds and entrySources', () => {
+    const promo = makePromo({
+      targeting: { visitorClass: 'newcomer', newcomerMaxAgeDays: 14 } as never,
+      entrySources: ['telegram', 'search'] as never,
+    });
+    const res = promoSchema.safeParse(promo);
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.targeting.visitorClass).toBe('newcomer');
+      expect(res.data.targeting.newcomerMaxAgeDays).toBe(14);
+      expect(res.data.entrySources).toEqual(['telegram', 'search']);
+    }
+  });
+
+  it('old promos without the new fields still parse (back-compat)', () => {
+    const res = promoSchema.safeParse(makePromo());
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.entrySources).toBeUndefined();
+      expect(res.data.targeting.visitorClass).toBeUndefined();
+    }
+  });
+
+  it('rejects out-of-range thresholds and unknown source classes', () => {
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'newcomer', newcomerMaxAgeDays: 0 } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'regular', regularMinVisitDays: 31 } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ targeting: { visitorClass: 'vip' } as never })).success).toBe(false);
+    expect(promoSchema.safeParse(makePromo({ entrySources: ['vk'] } as never)).success).toBe(false);
+  });
+
+  it('accepts an empty entrySources array (lenient pool must not drop the promo)', () => {
+    expect(promoSchema.safeParse(makePromo({ entrySources: [] } as never)).success).toBe(true);
+  });
+});

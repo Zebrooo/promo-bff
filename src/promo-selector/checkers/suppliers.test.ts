@@ -23,7 +23,7 @@ class NeedsListingStats extends Checker<'listingStats'> {
 
 function makeDeps(getImpressions = vi.fn(async () => ({ counts: {}, lastShownAt: {} }))): SupplierDeps {
   return {
-    userService: { getUserProfile: vi.fn(async (id: string) => ({ userId: id, age: 30, region: 'ru' })) },
+    userService: { getUserProfile: vi.fn(async (id: string) => ({ userId: id, age: 30, region: 'ru', accountAgeDays: 3 })) },
     billingService: { getSubscription: vi.fn(async () => ({ level: 'plus' as const })) },
     impressionStore: { getImpressions, recordImpression: vi.fn(async () => {}) },
     listingService: { getListingStats: vi.fn(async () => makeListingStats(0).listingStats) },
@@ -45,9 +45,21 @@ describe('loadSuppliers', () => {
     const deps = makeDeps();
     const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, deps);
     expect(data.userData).toEqual({
-      age: 30, region: 'ru', subscriptionLevel: 'plus', impressionCounts: {}, lastShownAt: {},
+      age: 30, accountAgeDays: 3, region: 'ru', subscriptionLevel: 'plus', impressionCounts: {}, lastShownAt: {},
     });
     expect(deps.impressionStore.getImpressions).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards accountAgeDays for an account identity', async () => {
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], ctx, makeDeps());
+    expect(data.userData?.accountAgeDays).toBe(3);
+  });
+
+  it('accountAgeDays is undefined for an anonymous identity (no profile read)', async () => {
+    const deps = makeDeps();
+    const data = await loadSuppliers([new NeedsUserData() as Checker<SupplierId>], { userId: 'anon-1', identityKind: 'anonymous' }, deps);
+    expect(data.userData?.accountAgeDays).toBeUndefined();
+    expect(deps.userService.getUserProfile).not.toHaveBeenCalled();
   });
 
   it('does not load userData when no active checker requires it', async () => {

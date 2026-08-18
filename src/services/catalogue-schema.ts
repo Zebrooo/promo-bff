@@ -9,6 +9,9 @@ export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 export const promoOsSchema = z.enum(['ios', 'android']);
 export const promoEnvironmentSchema = z.enum(['browser', 'telegram', 'pwa', 'app']);
 export const deviceBrandSchema = z.enum(['iphone', 'android-flagship', 'android-other']);
+export const geoSegmentSchema = z.enum(['local', 'tourist', 'other']);
+export const entrySourceSchema = z.enum(['direct', 'search', 'telegram', 'other']);
+export const visitorClassSchema = z.enum(['newcomer', 'regular']);
 
 export const searchTargetingSchema = z.object({
   terms: z.array(
@@ -47,12 +50,25 @@ export const listingsTargetingSchema = z.object({
   inactiveDays: z.number().int().nonnegative().optional(),
 });
 
+/** Dayparting-блок (спека targeting-schedule §3). Зеркалит scheduleSchema
+ *  кабинета, но с .catch(undefined) на месте использования — кривое
+ *  ОПЦИОНАЛЬНОЕ поле не должно ронять всё промо в parsePoolLeniently
+ *  (намеренная асимметрия: кабинет строгий, BFF снисходительный, fail-open). */
+export const scheduleSchema = z.object({
+  daysOfWeek: z.array(z.number().int().min(1).max(7))
+    .min(1)
+    .refine((d) => new Set(d).size === d.length),
+  hourStart: z.number().int().min(0).max(23),
+  hourEnd: z.number().int().min(1).max(24),
+}).refine((s) => s.hourStart < s.hourEnd);
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
+  schedule: scheduleSchema.optional().catch(undefined),
   targeting: z.object({
     minAge: z.number().int().nonnegative().optional(),
     maxAge: z.number().int().nonnegative().optional(),
@@ -61,6 +77,13 @@ export const promoSchema = z.object({
     os: z.array(promoOsSchema).optional(),
     environments: z.array(promoEnvironmentSchema).optional(),
     deviceBrands: z.array(deviceBrandSchema).optional(),
+    /** IP-гео (GeoChecker): сегменты «где сейчас» + города-слаги. Mirrors the cabinet schema. */
+    geoSegments: z.array(geoSegmentSchema).optional(),
+    geoCities: z.array(z.string().min(1).max(64)).optional(),
+    /** Профиль визита (VisitorChecker): newcomer/regular + пороги. Mirrors the cabinet schema. */
+    visitorClass: visitorClassSchema.optional(),
+    newcomerMaxAgeDays: z.number().int().min(1).max(365).optional(),
+    regularMinVisitDays: z.number().int().min(1).max(30).optional(),
     search: searchTargetingSchema.optional(),
     purchases: purchasesTargetingSchema.optional(),
     balance: balanceTargetingSchema.optional(),
@@ -129,6 +152,10 @@ export const promoSchema = z.object({
    * DeviceChecker): a `deviceTarget:'desktop'` promo is dropped for a touch
    * user and vice versa. Mirrors the cabinet schema. */
   deviceTarget: deviceTargetSchema.optional(),
+  /** Источник захода (SourceChecker). БЕЗ .min(1): пустой массив в руками
+   *  правленном пуле должен пройти парс и молча скипнуть чекер, а не выронить
+   *  промо целиком из parsePoolLeniently. Mirrors the cabinet schema. */
+  entrySources: z.array(entrySourceSchema).optional(),
 })
   // Multistep needs its steps — a step-less wizard would render to nothing on
   // the storefront (fail-safe null), so reject it here like the cabinet does.

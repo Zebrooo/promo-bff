@@ -182,3 +182,55 @@ describe('handleSelectPromoList', () => {
     if (inTelegram.status === 'ok') expect(inTelegram.steps.map((s) => s.id)).toEqual(['any', 'tg']);
   });
 });
+
+describe('IP-geo targeting (WS-2, list)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const geoPromo = makePromo({ id: 'geo-tourists', targeting: { geoSegments: ['tourist'] } });
+  const queue = () => fakeConfigService({ getQueue: async () => ({ promos: [geoPromo], persist: false }) });
+
+  it('passes params.geo down to the checkers (geo-targeted step included for a matching viewer)', async () => {
+    const result = await handleSelectPromoList(
+      { userId: 'u1', geo: { segment: 'tourist' } },
+      deps({ configService: queue() }),
+    );
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.steps.map((s) => s.id)).toEqual(['geo-tourists']);
+  });
+
+  it('filters a geo-targeted step when the request carries no geo (fail-closed)', async () => {
+    const result = await handleSelectPromoList({ userId: 'u1' }, deps({ configService: queue() }));
+    expect(result).toEqual({ status: 'skipped', reason: 'no_promo' });
+  });
+});
+
+describe('visit-profile targeting (WS-4, list)', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+
+  it('passes params.visit down to the checkers and strips entrySources from steps', async () => {
+    const configService = fakeConfigService({
+      getQueue: async () => ({
+        promos: [makePromo({ id: 'tg', entrySources: ['telegram'] }), makePromo({ id: 'open' })],
+        persist: false,
+      }),
+    });
+    const withVisit = await handleSelectPromoList(
+      { userId: 'u1', visit: { source: 'telegram' } },
+      deps({ configService }),
+    );
+    expect(withVisit.status).toBe('ok');
+    if (withVisit.status !== 'ok') return;
+    expect(withVisit.steps.map((s) => s.id)).toEqual(['tg', 'open']);
+    expect(withVisit.steps[0]).not.toHaveProperty('entrySources');
+
+    __clearUserDataCache();
+    const noVisit = await handleSelectPromoList({ userId: 'u1' }, deps({ configService }));
+    expect(noVisit.status).toBe('ok');
+    if (noVisit.status !== 'ok') return;
+    expect(noVisit.steps.map((s) => s.id)).toEqual(['open']);
+  });
+});
