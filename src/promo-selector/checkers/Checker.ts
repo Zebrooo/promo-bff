@@ -45,6 +45,12 @@ export interface CheckContext {
   formats?: string[];
   /** Search rows preloaded once for the whole selection walk. */
   searchHistory?: SearchHistoryEntry[];
+  /** Поведенческий сигнал (интересы + телефоны), преднагруженный model handler'ом.
+   *  undefined = сигнал не загружали или не смогли → interest/hot-buyer fail closed. */
+  behavior?: BehaviorSignal;
+  /** Карточек объявлений, открытых зрителем за текущий визит (из params сайта).
+   *  undefined = неизвестно → engagement-промо fail closed. */
+  sessionViews?: number;
   /** Покупки пакетов, преднагруженные на максимальное lookbackDays среди
    *  промо в очереди. Каждый чекер сам фильтрует по своему окну. */
   purchases?: PurchaseEntry[];
@@ -60,6 +66,15 @@ export interface SearchHistoryEntry {
   query: string;
   section: string;
   createdAt: string;
+}
+
+/** Агрегаты поведения зрителя из RPC promo_viewer_behavior (только агрегаты,
+ *  сырые события не покидают Postgres abkhaz-auto). */
+export interface BehaviorSignal {
+  /** Категории, чьи объявления зритель открывал за 14 дней, свежие первыми. */
+  interests: { category: string; lastViewedAt: string }[];
+  /** Сколько РАЗНЫХ объявлений с открытым телефоном за 7 дней. */
+  phoneViews7d: number;
 }
 
 export interface PurchaseEntry {
