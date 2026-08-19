@@ -120,6 +120,10 @@ export const promoSchema = z.object({
   afterClickPromoId: z.string().min(1).max(64).optional(),
   /** Анти-таргетинг: скрыть промо после клика по его CTA (ReactionChecker). */
   suppressAfterClick: z.boolean().optional(),
+  /** Лид-режим: кнопка отправляет телефон пользователя рекламодателю вместо
+   *  перехода по ссылке. Обрабатывает сайт; bff только пропускает поле и
+   *  гасит промо после лида (ReactionChecker). Mirrors the cabinet schema. */
+  leadCapture: z.boolean().optional(),
   format: promoFormatSchema,
   /** Custom format only: picks the host-owned render function via the
    *  <PromoProvider customFormats> map. Field-level optional here; the cabinet

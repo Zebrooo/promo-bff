@@ -358,6 +358,24 @@ describe('POST /clicks', () => {
     await app.close();
   });
 
+  it('accepts kind lead — заявка «Связаться» гасит промо тем же контуром', async () => {
+    const calls: string[] = [];
+    const app = buildServer({
+      logger: false,
+      deps: {
+        clickStore: {
+          getClicks: async () => ({ counts: {} }),
+          recordClick: async (_u, _p, kind) => {
+            calls.push(kind);
+          },
+        },
+      },
+    });
+    expect((await postClick(app, { userId: 'u1', promoId: 'p1', kind: 'lead' })).statusCode).toBe(200);
+    expect(calls).toEqual(['lead']);
+    await app.close();
+  });
+
   it('accepts kind conversion explicitly', async () => {
     const calls: string[] = [];
     const app = buildServer({
@@ -1132,6 +1150,65 @@ describe('health probes', () => {
     const app = buildServer({ logger: false });
     const res = await app.inject({ method: 'GET', url: '/ready' });
     expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
+describe('GET /leads', () => {
+  const leads = [
+    {
+      createdAt: '2026-08-19T10:00:00Z',
+      promoId: 'divany',
+      promoTitle: 'Диваны',
+      page: '/mebel',
+      name: 'Пётр',
+      phone: '+79781234567',
+    },
+  ];
+  const get = (
+    app: ReturnType<typeof buildServer>,
+    query = '',
+    headers: Record<string, string> = AUTH,
+  ) => app.inject({ method: 'GET', url: `/leads${query}`, headers });
+
+  it('returns 401 when not authorized — телефоны наружу не отдаём', async () => {
+    const app = buildServer({ logger: false });
+    expect((await get(app, '', {})).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('returns the leads with the parsed filters', async () => {
+    const seen: unknown[] = [];
+    const app = buildServer({
+      logger: false,
+      deps: { leadStore: { getLeads: async (q) => { seen.push(q); return leads; } } },
+    });
+
+    const res = await get(app, '?promoId=divany&from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&limit=10');
+
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ leads, total: 1 });
+    expect(seen).toEqual([
+      { promoId: 'divany', from: '2026-08-01T00:00:00Z', to: '2026-09-01T00:00:00Z', limit: 10 },
+    ]);
+    await app.close();
+  });
+
+  it('rejects a non-numeric / out-of-range limit and unparsable dates', async () => {
+    const app = buildServer({ logger: false, deps: { leadStore: { getLeads: async () => leads } } });
+    expect((await get(app, '?limit=all')).statusCode).toBe(400);
+    expect((await get(app, '?limit=0')).statusCode).toBe(400);
+    expect((await get(app, '?limit=999999')).statusCode).toBe(400);
+    expect((await get(app, '?from=вчера')).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('returns 502 when the store read fails', async () => {
+    const app = buildServer({
+      logger: false,
+      deps: { leadStore: { getLeads: async () => { throw new Error('supabase down'); } } },
+    });
+    expect((await get(app)).statusCode).toBe(502);
     await app.close();
   });
 });

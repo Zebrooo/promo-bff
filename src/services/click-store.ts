@@ -9,7 +9,7 @@
 import { config, type SupabaseConfig } from '../config';
 import { withTimeout } from '../util/with-timeout';
 
-export type ClickKind = 'cta' | 'conversion';
+export type ClickKind = 'cta' | 'conversion' | 'lead';
 
 export interface ClickData {
   /** promoId -> суммарные клики этого пользователя (все kind'ы). */

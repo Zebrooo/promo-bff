@@ -564,3 +564,21 @@ describe('promoSchema — lifecycle (wave B)', () => {
     expect(promoSchema.parse(makePromo()).lifecycle).toBeUndefined();
   });
 });
+
+describe('promoSchema — лид-режим (leadCapture)', () => {
+  it('пропускает leadCapture до чекеров и до рендерера', () => {
+    const result = promoSchema.safeParse(makePromo({ leadCapture: true }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.leadCapture).toBe(true);
+  });
+
+  it('поле необязательное — промо без него парсится как прежде', () => {
+    const result = promoSchema.safeParse(makePromo({}));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.leadCapture).toBeUndefined();
+  });
+
+  it('нестрогое значение отвергается (только boolean)', () => {
+    expect(promoSchema.safeParse({ ...makePromo(), leadCapture: 'yes' }).success).toBe(false);
+  });
+});

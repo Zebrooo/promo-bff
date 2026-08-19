@@ -8,6 +8,7 @@ import { createUserService } from './services/user-service';
 import { createBillingService } from './services/billing-service';
 import { createImpressionStore } from './services/impression-store';
 import { createClickStore } from './services/click-store';
+import { createLeadStore, LEADS_DEFAULT_LIMIT, LEADS_MAX_LIMIT, type LeadStore } from './services/lead-store';
 import { createFeedFrequencyService } from './services/feed-frequency-service';
 import { createEventStore, type EventStore } from './services/event-store';
 import { createErrorStore, type ErrorStore } from './services/error-store';
@@ -66,6 +67,8 @@ export interface BuildServerOptions {
         analyticsStore: AnalyticsStore;
         errorStore: ErrorStore;
         referralConfigService: ReferralConfigService;
+        /** Чтение promo_leads для кабинета (GET /leads). */
+        leadStore: LeadStore;
         /** test/prod пара — держим оба стора, роут резолвит нужный по body.env. */
         aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
       }
@@ -168,6 +171,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     logger: app.log,
     ...opts.deps,
   };
+
+  // Чтение лидов для кабинета — вне SelectPromoDeps: к выбору промо стор
+  // отношения не имеет, его единственный потребитель — GET /leads ниже.
+  const leadStore: LeadStore = opts.deps?.leadStore ?? createLeadStore();
 
   const auctionDeps: AuctionDeps = {
     campaignService: createCampaignService(),
@@ -408,8 +415,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         .code(400)
         .send({ error: 'bad_request', reason: 'userId and promoId are required non-empty strings' });
     }
-    if (kind !== 'cta' && kind !== 'conversion') {
-      return reply.code(400).send({ error: 'bad_request', reason: "kind must be 'cta' or 'conversion'" });
+    if (kind !== 'cta' && kind !== 'conversion' && kind !== 'lead') {
+      return reply
+        .code(400)
+        .send({ error: 'bad_request', reason: "kind must be 'cta', 'conversion' or 'lead'" });
     }
 
     // Клики по кампаниям здесь не живут — у них свой биллинговый контур
@@ -426,6 +435,53 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
 
     return reply.code(200).send({ ok: true });
+  });
+
+  // Лиды промо для кабинета: телефон и имя человека, нажавшего «Связаться»
+  // (спека 2026-08-19-promo-hot-lead-design). Пишет их САЙТ прямо в свою базу;
+  // здесь только чтение под service-role — у кабинета доступа к базе с ПДн нет.
+  // Та же авторизация, что у /clicks и /models.
+  app.get('/leads', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+
+    const q = (request.query ?? {}) as Record<string, unknown>;
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+
+    const rawLimit = str(q.limit);
+    if (rawLimit !== undefined && !/^\d+$/.test(rawLimit)) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'limit must be a positive integer' });
+    }
+    const limit = rawLimit === undefined ? LEADS_DEFAULT_LIMIT : Number(rawLimit);
+    if (limit < 1 || limit > LEADS_MAX_LIMIT) {
+      return reply
+        .code(400)
+        .send({ error: 'bad_request', reason: `limit must be between 1 and ${LEADS_MAX_LIMIT}` });
+    }
+
+    // Даты приходят из формы кабинета — принимаем только разбираемые.
+    for (const key of ['from', 'to'] as const) {
+      const value = str(q[key]);
+      if (value !== undefined && Number.isNaN(Date.parse(value))) {
+        return reply.code(400).send({ error: 'bad_request', reason: `${key} must be an ISO date` });
+      }
+    }
+
+    try {
+      const leads = await leadStore.getLeads({
+        promoId: str(q.promoId),
+        from: str(q.from),
+        to: str(q.to),
+        limit,
+      });
+      return reply.code(200).send({ leads, total: leads.length });
+    } catch (err) {
+      app.log.error({ err }, 'GET /leads: store unavailable');
+      return reply.code(502).send({ error: 'lead_store_unavailable' });
+    }
   });
 
   // B2C CPM auction. Separate flow from /models: returns the winning advertiser

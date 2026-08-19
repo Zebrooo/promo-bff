@@ -26,6 +26,21 @@ describe('ReactionChecker', () => {
     expect(c.check(ctx, makeSuppliers({ clickCounts: { p: 1 } }))).toBe(false);
   });
 
+  it('лид-режим включает подавление сам, без suppressAfterClick', () => {
+    const ctx = makeCheckContext({ promo: makePromo({ id: 'p', leadCapture: true }) });
+    expect(c.shouldSkip(ctx)).toBe(false);
+    // Заявка приехала строкой kind='lead' — стор схлопнул её в counts.
+    expect(c.check(ctx, makeSuppliers({ clickCounts: { p: 1 } }))).toBe(false);
+    // Ещё не отправлял — показываем.
+    expect(c.check(ctx, makeSuppliers({ clickCounts: {} }))).toBe(true);
+  });
+
+  it('leadCapture: false ведёт себя как обычное промо', () => {
+    expect(
+      c.shouldSkip(makeCheckContext({ promo: makePromo({ id: 'p', leadCapture: false }) })),
+    ).toBeTruthy();
+  });
+
   it('blocks on a conversion-only reaction (store схлопнул kind-ы в counts)', () => {
     // click-store суммирует строки cta+conversion в один counts[promoId];
     // фикстура: только конверсия (одна строка kind='conversion', count=1).
