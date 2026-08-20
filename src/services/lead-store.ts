@@ -20,6 +20,10 @@ export interface Lead {
   page: string;
   name: string;
   phone: string;
+  /** Доставка заявки рекламодателю (миграция 0307): pending | sent |
+   *  no_subscriber | failed. У старых строк колонки нет → 'pending'. */
+  notifyStatus: string;
+  notifiedAt: string | null;
 }
 
 export interface LeadQuery {
@@ -45,6 +49,8 @@ interface LeadRow {
   page: string | null;
   name: string | null;
   phone: string | null;
+  notify_status?: string | null;
+  notified_at?: string | null;
 }
 
 function authHeaders(key: string): Record<string, string> {
@@ -59,6 +65,8 @@ function mapRow(row: LeadRow): Lead {
     page: row.page ?? '',
     name: row.name ?? '',
     phone: row.phone ?? '',
+    notifyStatus: row.notify_status ?? 'pending',
+    notifiedAt: row.notified_at ?? null,
   };
 }
 
@@ -76,7 +84,7 @@ export function createLeadStore(cfg: SupabaseConfig = config.supabase): LeadStor
   async function getLeads(query: LeadQuery): Promise<Lead[]> {
     const limit = Math.min(Math.max(query.limit ?? LEADS_DEFAULT_LIMIT, 1), LEADS_MAX_LIMIT);
     const params = [
-      'select=created_at,promo_id,promo_title,page,name,phone',
+      'select=created_at,promo_id,promo_title,page,name,phone,notify_status,notified_at',
       'order=created_at.desc',
       `limit=${limit}`,
     ];

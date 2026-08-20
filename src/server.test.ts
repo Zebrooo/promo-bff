@@ -1167,6 +1167,8 @@ describe('GET /leads', () => {
       page: '/mebel',
       name: 'Пётр',
       phone: '+79781234567',
+      notifyStatus: 'sent',
+      notifiedAt: '2026-08-19T10:00:05Z',
     },
   ];
   const get = (
