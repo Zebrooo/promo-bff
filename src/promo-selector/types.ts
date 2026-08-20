@@ -260,4 +260,10 @@ export interface Promo {
    *  Внутри bff даёт один эффект: ReactionChecker гасит такое промо тому, кто
    *  уже отдал телефон (строка promo_clicks с kind='lead'). */
   leadCapture?: boolean;
+  /** Номер рекламодателя (E.164), на который сайт мгновенно доставляет заявку
+   *  (спека 2026-08-20-lead-delivery-design). SERVER-ONLY: в отличие от
+   *  leadCapture, поле в strip-списке Advertisement — креатив уезжает в
+   *  браузер каждому зрителю, и номер партнёра там не нужен. Сайт получает его
+   *  серверным запросом GET /promo-lead-target. */
+  leadPhone?: string;
 }

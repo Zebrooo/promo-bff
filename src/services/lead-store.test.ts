@@ -23,8 +23,11 @@ describe('createLeadStore (Supabase)', () => {
       page: '/mebel',
       name: 'Пётр',
       phone: '+79781234567',
+      notify_status: 'sent',
+      notified_at: '2026-08-19T10:00:05Z',
     },
     // Пустые поля приходят null'ами — маппинг обязан отдавать строки.
+    // Колонок доставки у старых строк нет вовсе → статус 'pending'.
     { created_at: '2026-08-18T09:00:00Z', promo_id: 'divany', promo_title: null, page: null, name: null, phone: null },
   ];
 
@@ -44,12 +47,24 @@ describe('createLeadStore (Supabase)', () => {
         page: '/mebel',
         name: 'Пётр',
         phone: '+79781234567',
+        notifyStatus: 'sent',
+        notifiedAt: '2026-08-19T10:00:05Z',
       },
-      { createdAt: '2026-08-18T09:00:00Z', promoId: 'divany', promoTitle: '', page: '', name: '', phone: '' },
+      {
+        createdAt: '2026-08-18T09:00:00Z',
+        promoId: 'divany',
+        promoTitle: '',
+        page: '',
+        name: '',
+        phone: '',
+        notifyStatus: 'pending',
+        notifiedAt: null,
+      },
     ]);
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain('/rest/v1/promo_leads?');
     expect(url).toContain('order=created_at.desc');
+    expect(url).toContain('notify_status');
     expect(url).toContain('limit=500');
   });
 

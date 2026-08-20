@@ -16,6 +16,7 @@ import type { ChargeService } from './services/charge-service';
 import type { EventStore, EventPayload } from './services/event-store';
 import type { AnalyticsStore } from './services/analytics-store';
 import { makePromo } from './test-utils';
+import type { Promo } from './promo-selector/types';
 
 const fakeConfig = (promos = [makePromo({
   id: 'summer-sale',
@@ -26,7 +27,7 @@ const fakeConfig = (promos = [makePromo({
   action: { href: '/sale/summer', label: 'Подробнее' },
   dismissible: true,
 })]): { configService: ConfigService } => ({
-  configService: { getQueue: async () => ({ promos, persist: false }) },
+  configService: { getQueue: async () => ({ promos, persist: false }), getPromoById: async () => promos[0] ?? null },
 });
 
 const AUTH = { authorization: 'Bearer test-token' };
@@ -116,6 +117,9 @@ describe('POST /models', () => {
   it('returns HTTP 200 with an error envelope when a dependency fails', async () => {
     const brokenConfig: ConfigService = {
       getQueue: async () => {
+        throw new Error('bunker unreachable');
+      },
+      getPromoById: async () => {
         throw new Error('bunker unreachable');
       },
     };
@@ -1163,6 +1167,8 @@ describe('GET /leads', () => {
       page: '/mebel',
       name: 'Пётр',
       phone: '+79781234567',
+      notifyStatus: 'sent',
+      notifiedAt: '2026-08-19T10:00:05Z',
     },
   ];
   const get = (
@@ -1210,5 +1216,72 @@ describe('GET /leads', () => {
     });
     expect((await get(app)).statusCode).toBe(502);
     await app.close();
+  });
+});
+
+describe('GET /promo-lead-target', () => {
+  const promo = makePromo({ id: 'divany', title: 'Диваны', leadCapture: true, leadPhone: '+79781234567' });
+  const app = (over: Partial<Promo> | null = {}) =>
+    buildServer({
+      logger: false,
+      deps: {
+        configService: {
+          getQueue: async () => ({ promos: [], persist: false }),
+          getPromoById: async () => (over === null ? null : ({ ...promo, ...over } as Promo)),
+        },
+      },
+    });
+  const get = (
+    a: ReturnType<typeof buildServer>,
+    qs = '?promoId=divany',
+    headers: Record<string, string> = AUTH,
+  ) => a.inject({ method: 'GET', url: `/promo-lead-target${qs}`, headers });
+
+  it('returns 401 without credentials — номер партнёра не публичный', async () => {
+    const a = app();
+    expect((await get(a, '?promoId=divany', {})).statusCode).toBe(401);
+    await a.close();
+  });
+
+  it('отдаёт номер и название — ни креатива, ни таргетинга', async () => {
+    const a = app();
+    const res = await get(a);
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({ phone: '+79781234567', title: 'Диваны' });
+    await a.close();
+  });
+
+  it('400 без promoId', async () => {
+    const a = app();
+    expect((await get(a, '')).statusCode).toBe(400);
+    await a.close();
+  });
+
+  it('404, когда промо нет, сбор лидов выключен или номер не задан', async () => {
+    const missing = app(null);
+    expect((await get(missing)).statusCode).toBe(404);
+    await missing.close();
+
+    const noCapture = app({ leadCapture: false });
+    expect((await get(noCapture)).statusCode).toBe(404);
+    await noCapture.close();
+
+    const noPhone = app({ leadPhone: undefined });
+    expect((await get(noPhone)).statusCode).toBe(404);
+    await noPhone.close();
+  });
+
+  it('502, когда каталог недоступен', async () => {
+    const a = buildServer({
+      logger: false,
+      deps: {
+        configService: {
+          getQueue: async () => ({ promos: [], persist: false }),
+          getPromoById: async () => { throw new Error('s3 down'); },
+        },
+      },
+    });
+    expect((await get(a)).statusCode).toBe(502);
+    await a.close();
   });
 });
