@@ -1220,7 +1220,7 @@ describe('GET /leads', () => {
 });
 
 describe('GET /promo-lead-target', () => {
-  const promo = makePromo({ id: 'divany', leadCapture: true, leadPhone: '+79781234567' });
+  const promo = makePromo({ id: 'divany', title: 'Диваны', leadCapture: true, leadPhone: '+79781234567' });
   const app = (over: Partial<Promo> | null = {}) =>
     buildServer({
       logger: false,
@@ -1243,11 +1243,11 @@ describe('GET /promo-lead-target', () => {
     await a.close();
   });
 
-  it('отдаёт ТОЛЬКО номер и ничего больше', async () => {
+  it('отдаёт номер и название — ни креатива, ни таргетинга', async () => {
     const a = app();
     const res = await get(a);
     expect(res.statusCode).toBe(200);
-    expect(body(res)).toEqual({ phone: '+79781234567' });
+    expect(body(res)).toEqual({ phone: '+79781234567', title: 'Диваны' });
     await a.close();
   });
 

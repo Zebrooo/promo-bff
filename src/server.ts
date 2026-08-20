@@ -441,7 +441,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // 2026-08-20-lead-delivery-design §4). Поле leadPhone server-only: в креативе
   // его нет, поэтому сайт спрашивает его здесь — в момент, когда лид уже
   // сохранён и надо решить, в какой чат он летит.
-  // Отдаём ТОЛЬКО номер: ни креатива, ни таргетинга, ни прочих полей промо.
+  // Отдаём номер и название кампании — и ничего больше: ни креатива, ни
+  // таргетинга. Название нужно сайту для сообщения рекламодателю; брать его из
+  // тела запроса клиента нельзя — это был бы готовый канал для фишинга в чужой
+  // Telegram (блокер авто-ревью abkhaz-auto#644).
   app.get('/promo-lead-target', async (request, reply) => {
     const auth = await authenticator.authenticate(request);
     if (!auth.authorized) {
@@ -469,7 +472,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
 
-    return reply.code(200).send({ phone: promo.leadPhone });
+    return reply.code(200).send({ phone: promo.leadPhone, title: promo.title });
   });
 
   // Лиды промо для кабинета: телефон и имя человека, нажавшего «Связаться»
