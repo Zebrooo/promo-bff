@@ -11,6 +11,7 @@ import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
   getQueue: async () => ({ promos: [makePromo()], persist: false }),
+  getPromoById: async () => null,
   ...over,
 });
 
@@ -1129,5 +1130,22 @@ describe('handleSelectPromo lifecycle gate (wave B)', () => {
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [makePromo({ id: 'plain' })], persist: false }) });
     const result = await handleSelectPromo({ userId: 'lc-plain-1' }, deps({ configService }));
     expect(result.status).toBe('ok');
+  });
+});
+
+describe('handleSelectPromo лид-режим (доставка)', () => {
+  it('leadPhone НЕ уезжает клиенту, а leadCapture уезжает', async () => {
+    // Номер рекламодателя server-only: креатив видит каждый зритель, и партнёрский
+    // телефон в нём — утечка. Сайт берёт его отдельным запросом /promo-lead-target.
+    const promo = makePromo({ id: 'divany', leadCapture: true, leadPhone: '+79781234567' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+
+    const result = await handleSelectPromo({ userId: 'lead-strip' }, deps({ configService }));
+
+    expect(result.status).toBe('ok');
+    const data = (result as Extract<typeof result, { status: 'ok' }>).data;
+    expect(data).not.toHaveProperty('leadPhone');
+    expect(JSON.stringify(data)).not.toContain('79781234567');
+    expect(data).toHaveProperty('leadCapture', true);
   });
 });

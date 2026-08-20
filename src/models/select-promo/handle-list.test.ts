@@ -11,6 +11,7 @@ import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
   getQueue: async () => ({ promos: [makePromo()], persist: false }),
+  getPromoById: async () => null,
   ...over,
 });
 const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({

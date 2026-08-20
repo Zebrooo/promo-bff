@@ -66,6 +66,10 @@ async function fetchQueueObject(queueName: string, logger?: ConfigLogger): Promi
 export interface ConfigService {
   /** Ordered active promos for a named queue + the queue's persist flag. */
   getQueue(queueName: string): Promise<{ promos: Promo[]; persist: boolean }>;
+  /** Promo by id straight from the pool, ignoring queues — used by
+   *  GET /promo-lead-target, which needs a server-only field of a promo the
+   *  site has already shown. Null when the pool has no such id. */
+  getPromoById(promoId: string): Promise<Promo | null>;
 }
 
 /**
@@ -104,6 +108,15 @@ export function createConfigService(logger?: ConfigLogger): ConfigService {
   };
 
   return {
+    getPromoById: async (promoId) => {
+      // Тот же кэш пула, что и у getQueue: отдельных чтений S3 не добавляется.
+      const pool = await withTimeout(
+        cachedLoad('pool', () => fetchPool(logger)),
+        ms,
+        'configService.getPromoById',
+      );
+      return pool.find((p) => p.id === promoId) ?? null;
+    },
     getQueue: async (queueName) => {
       const [pool, queueObj] = await withTimeout(
         Promise.all([

@@ -124,6 +124,9 @@ export const promoSchema = z.object({
    *  перехода по ссылке. Обрабатывает сайт; bff только пропускает поле и
    *  гасит промо после лида (ReactionChecker). Mirrors the cabinet schema. */
   leadCapture: z.boolean().optional(),
+  /** Номер рекламодателя для доставки заявки (E.164). Server-only — на сайт
+   *  уезжает только через GET /promo-lead-target. Mirrors the cabinet schema. */
+  leadPhone: z.string().min(1).max(32).optional(),
   format: promoFormatSchema,
   /** Custom format only: picks the host-owned render function via the
    *  <PromoProvider customFormats> map. Field-level optional here; the cabinet

@@ -437,6 +437,41 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.code(200).send({ ok: true });
   });
 
+  // Номер рекламодателя для доставки заявки (спека
+  // 2026-08-20-lead-delivery-design §4). Поле leadPhone server-only: в креативе
+  // его нет, поэтому сайт спрашивает его здесь — в момент, когда лид уже
+  // сохранён и надо решить, в какой чат он летит.
+  // Отдаём ТОЛЬКО номер: ни креатива, ни таргетинга, ни прочих полей промо.
+  app.get('/promo-lead-target', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+
+    const q = (request.query ?? {}) as Record<string, unknown>;
+    const promoId = typeof q.promoId === 'string' ? q.promoId.trim() : '';
+    if (!promoId) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'promoId is required' });
+    }
+
+    let promo;
+    try {
+      promo = await deps.configService.getPromoById(promoId);
+    } catch (err) {
+      app.log.error({ err }, 'GET /promo-lead-target: catalogue unavailable');
+      return reply.code(502).send({ error: 'catalogue_unavailable' });
+    }
+
+    // Нет промо или у него не включён сбор лидов — доставлять некому. 404, а не
+    // пустой номер: сайт различает «не нашли» и «bff сломался» (первое молчит
+    // в логах, второе шумит).
+    if (!promo || promo.leadCapture !== true || !promo.leadPhone) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+
+    return reply.code(200).send({ phone: promo.leadPhone });
+  });
+
   // Лиды промо для кабинета: телефон и имя человека, нажавшего «Связаться»
   // (спека 2026-08-19-promo-hot-lead-design). Пишет их САЙТ прямо в свою базу;
   // здесь только чтение под service-role — у кабинета доступа к базе с ПДн нет.
