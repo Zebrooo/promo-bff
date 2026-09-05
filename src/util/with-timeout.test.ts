@@ -39,6 +39,22 @@ describe('withTimeout', () => {
     expect(controller.signal.aborted).toBe(true);
   });
 
+  it('keeps TimeoutError when abort synchronously rejects the wrapped operation', async () => {
+    const controller = new AbortController();
+    const abortable = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        reject(new DOMException('aborted', 'AbortError'));
+      }, { once: true });
+    });
+
+    await expect(withTimeout(abortable, 10, 'abort-race', controller)).rejects.toMatchObject({
+      name: 'TimeoutError',
+      label: 'abort-race',
+      ms: 10,
+    });
+    expect(controller.signal.aborted).toBe(true);
+  });
+
   it('does NOT abort the controller when the promise resolves before the timeout', async () => {
     const controller = new AbortController();
     await withTimeout(Promise.resolve('ok'), 100, 'fast', controller);

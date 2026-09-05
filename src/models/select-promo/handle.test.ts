@@ -332,6 +332,23 @@ describe('handleSelectPromo', () => {
     expect(ok.status).toBe('ok');
   });
 
+  it('blocks a candidate after a recent impression of a different promo', async () => {
+    const promo = makePromo({ id: 'next-promo', cooldownHours: 24 });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'cross-promo-cooldown' }, deps({
+      configService,
+      now: () => new Date('2024-06-01T12:00:00.000Z'),
+      impressionStore: fakeImpressionStore({
+        getImpressions: async () => ({
+          counts: { 'previous-promo': 1 },
+          lastShownAt: { 'previous-promo': '2024-06-01T11:00:00.000Z' },
+        }),
+      }),
+    }));
+
+    expect(result.status).toBe('skipped');
+  });
+
   it('impression count from the store drives the optional limit checker', async () => {
     const promo = makePromo({ id: 'capped', maxImpressionsPerUser: 3 });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
