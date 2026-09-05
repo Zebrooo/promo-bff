@@ -44,11 +44,16 @@ export function createAnalyticsStore(cfg: SupabaseConfig = config.aaSupabase): A
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) return createNoopStore();
 
-  async function callRpc<T>(fn: string, body: Record<string, unknown> = {}): Promise<T> {
+  async function callRpc<T>(
+    fn: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<T> {
     const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
       method: 'POST',
       headers: { ...authHeaders(serviceRoleKey), 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -58,11 +63,18 @@ export function createAnalyticsStore(cfg: SupabaseConfig = config.aaSupabase): A
   }
 
   return {
-    getPromoTimeline: (promoId, days) =>
-      withTimeout(
-        callRpc<PromoTimelineRow[]>('promo_analytics_per_promo', { _promo_id: promoId, _days: days }),
+    getPromoTimeline: (promoId, days) => {
+      const controller = new AbortController();
+      return withTimeout(
+        callRpc<PromoTimelineRow[]>(
+          'promo_analytics_per_promo',
+          { _promo_id: promoId, _days: days },
+          controller.signal,
+        ),
         timeoutMs,
         'analyticsStore.getPromoTimeline',
-      ),
+        controller,
+      );
+    },
   };
 }

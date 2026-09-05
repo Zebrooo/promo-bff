@@ -168,7 +168,7 @@ export interface Promo {
   targeting: PromoTargeting;
   /** Max times one user may see this promo. Omitted = unlimited (limit checker skipped). */
   maxImpressionsPerUser?: number;
-  /** Minimum hours between two shows to the same user. 0 = no cooldown. */
+  /** Minimum hours since this user's latest impression of any promo. 0 = disabled. */
   cooldownHours: number;
   /** Chain: id of the predecessor promo. When set, this promo is eligible only
    *  after the user has at least one recorded impression of that predecessor

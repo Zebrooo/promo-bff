@@ -31,8 +31,12 @@ export function withTimeout<T>(
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      controller?.abort();
+      // Settle the public contract first. abort() synchronously notifies
+      // listeners, and an abort-aware operation may reject with AbortError in
+      // that same turn; rejecting here first keeps TimeoutError as the stable
+      // winner of Promise.race while still cancelling the underlying work.
       reject(new TimeoutError(label, ms));
+      controller?.abort();
     }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));

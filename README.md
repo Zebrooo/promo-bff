@@ -59,7 +59,9 @@ secret is needed. For BFF-first rollout compatibility, requests that omit
 `identityKind` retain the legacy behavior (`authenticated:true` means account,
 otherwise anonymous). Impressions are never TTL-cached: cooldown/frequency reads
 the shared store on every selection, immediately after `/impressions` and across
-BFF instances.
+BFF instances. A candidate's `cooldownHours` is measured from the viewer's most
+recent impression of any promo id, so changing formats or queues cannot restart
+the window.
 
 ## select-promo logic
 

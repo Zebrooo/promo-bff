@@ -20,9 +20,14 @@ describe('CooldownChecker', () => {
   it('skips when cooldownHours <= 0', () => {
     expect(c.shouldSkip(makeCheckContext({ promo: makePromo({ cooldownHours: 0 }) }))).toBeTruthy();
   });
-  it('blocks within the cooldown window', () => {
-    const ctx = makeCheckContext({ promo: makePromo({ id: 'p', cooldownHours: 24 }), now });
-    expect(c.check(ctx, makeSuppliers({ lastShownAt: { p: '2024-06-01T11:00:00.000Z' } }))).toBe(false);
+  it('blocks promo B within its cooldown after promo A was shown', () => {
+    const ctx = makeCheckContext({ promo: makePromo({ id: 'promo-b', cooldownHours: 24 }), now });
+    expect(c.check(ctx, makeSuppliers({
+      lastShownAt: {
+        'promo-a': '2024-06-01T11:00:00.000Z',
+        'promo-b': '2024-05-30T12:00:00.000Z',
+      },
+    }))).toBe(false);
   });
   it('allows after the cooldown elapses', () => {
     const ctx = makeCheckContext({ promo: makePromo({ id: 'p', cooldownHours: 24 }), now });
@@ -32,9 +37,18 @@ describe('CooldownChecker', () => {
     const ctx = makeCheckContext({ promo: makePromo({ id: 'p', cooldownHours: 24 }), now });
     expect(c.check(ctx, makeSuppliers({ lastShownAt: {} }))).toBe(true);
   });
+  it('ignores invalid last-shown timestamps', () => {
+    const ctx = makeCheckContext({ promo: makePromo({ id: 'promo-b', cooldownHours: 24 }), now });
+    expect(c.check(ctx, makeSuppliers({
+      lastShownAt: {
+        'promo-a': 'not-a-date',
+        'promo-b': '2024-05-30T12:00:00.000Z',
+      },
+    }))).toBe(true);
+  });
   it('allows at exactly the cooldown boundary', () => {
-    const ctx = makeCheckContext({ promo: makePromo({ id: 'p', cooldownHours: 24 }), now });
+    const ctx = makeCheckContext({ promo: makePromo({ id: 'promo-b', cooldownHours: 24 }), now });
     // exactly 24h before now → elapsed === cooldown, >= passes
-    expect(c.check(ctx, makeSuppliers({ lastShownAt: { p: '2024-05-31T12:00:00.000Z' } }))).toBe(true);
+    expect(c.check(ctx, makeSuppliers({ lastShownAt: { 'promo-a': '2024-05-31T12:00:00.000Z' } }))).toBe(true);
   });
 });
