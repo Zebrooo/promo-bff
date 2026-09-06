@@ -140,6 +140,7 @@ export const promoSchema = z.object({
   dismissible: z.boolean().optional(),
   backgroundColor: z.string().optional(),
   textColor: z.string().optional(),
+  descriptionColor: z.string().optional(),
   backgroundImage: z.string().optional(),
   backgroundGradient: z.object({
     from: z.string().min(1),

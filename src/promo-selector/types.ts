@@ -201,6 +201,8 @@ export interface Promo {
   backgroundColor?: string;
   /** Banner/overlay text colour (CSS color). */
   textColor?: string;
+  /** Description text colour (CSS color). Overrides textColor for the description. */
+  descriptionColor?: string;
   /** Background image URL for popup/fullscreen overlays. */
   backgroundImage?: string;
   /** Linear gradient background (preferred over backgroundColor when set, ignored if backgroundImage). */
