@@ -143,6 +143,67 @@ describe('campaignToAd', () => {
     }
   });
 
+  it('carries zoomBp through both the variant and the primary focal point', () => {
+    const candidate = {
+      ...cand({
+        format: 'banner',
+        title: 'Buy',
+        imageUrl: 'https://x/legacy.png',
+        imageFocalPoint: { xBp: 2500, yBp: 7500, zoomBp: 15_000 },
+        imageVariants: {
+          wide: {
+            imageUrl: 'https://x/wide.png',
+            width: 1200,
+            height: 150,
+            focalPoint: { xBp: 1000, yBp: 2000, zoomBp: 15_000 },
+          },
+          compact: {
+            imageUrl: 'https://x/compact.png',
+            width: 580,
+            height: 120,
+            focalPoint: { xBp: 8000, yBp: 7000 },
+          },
+        },
+      }),
+      bannerFormat: 'horizontal',
+    };
+
+    // variant path: imageVariants.wide.focalPoint -> ad.imageFocalPoint
+    expect(campaignToAd(candidate, { width: 1200, height: 150 })?.imageFocalPoint)
+      .toEqual({ xBp: 1000, yBp: 2000, zoomBp: 15_000 });
+    // primary path: creative.imageFocalPoint -> ad.imageFocalPoint
+    expect(campaignToAd(candidate)?.imageFocalPoint)
+      .toEqual({ xBp: 2500, yBp: 7500, zoomBp: 15_000 });
+  });
+
+  it('canonicalizes zoomBp 10_000 (1x) to an absent field', () => {
+    const ad = campaignToAd(cand({
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageFocalPoint: { xBp: 2500, yBp: 7500, zoomBp: 10_000 },
+    }));
+
+    expect(ad?.imageFocalPoint).toEqual({ xBp: 2500, yBp: 7500 });
+    expect(ad?.imageFocalPoint).not.toHaveProperty('zoomBp');
+  });
+
+  it('drops the whole focal point when zoomBp is out of range or not an integer', () => {
+    const project = (zoomBp: unknown) => campaignToAd(cand({
+      format: 'banner',
+      title: 'Buy',
+      imageUrl: 'https://x/legacy.png',
+      imageFocalPoint: { xBp: 2500, yBp: 7500, zoomBp },
+    }));
+
+    for (const invalid of [30_001, 1.5, 9_999, '20000']) {
+      const ad = project(invalid);
+      expect(ad?.imageUrl).toBe('https://x/legacy.png');
+      expect(ad).not.toHaveProperty('imageFocalPoint');
+    }
+    expect(project(30_000)?.imageFocalPoint).toEqual({ xBp: 2500, yBp: 7500, zoomBp: 30_000 });
+  });
+
   it('falls back to the canonical image for legacy requests or a malformed variant pair', () => {
     const partial = {
       format: 'banner',
