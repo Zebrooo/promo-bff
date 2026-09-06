@@ -37,7 +37,7 @@ function str(v: unknown): string | undefined {
 
 function imageFocalPoint(value: unknown): ImageFocalPoint | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const { xBp, yBp } = value as Record<string, unknown>;
+  const { xBp, yBp, zoomBp } = value as Record<string, unknown>;
   if (
     typeof xBp !== 'number' ||
     typeof yBp !== 'number' ||
@@ -49,6 +49,20 @@ function imageFocalPoint(value: unknown): ImageFocalPoint | undefined {
     yBp > 10_000
   ) {
     return undefined;
+  }
+  // Зум вокруг точки фокуса. Кривое значение отбрасывает точку целиком — как и
+  // кривые координаты: «свой» зум из битого креатива хуже центра по умолчанию.
+  if (zoomBp !== undefined) {
+    if (
+      typeof zoomBp !== 'number' ||
+      !Number.isInteger(zoomBp) ||
+      zoomBp < 10_000 ||
+      zoomBp > 30_000
+    ) {
+      return undefined;
+    }
+    // 10_000 = 1x: каноничная форма — отсутствие поля.
+    if (zoomBp !== 10_000) return { xBp, yBp, zoomBp };
   }
   return { xBp, yBp };
 }

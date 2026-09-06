@@ -36,6 +36,10 @@ export interface ImageFocalPoint {
   xBp: number;
   /** Vertical coordinate in basis points: 0 = top, 10_000 = bottom. */
   yBp: number;
+  /** Zoom around the focal point in basis points: 10_000 = 1x (canonical form
+   *  omits the field), maximum 30_000 = 3x. Authored in the storefront's promo
+   *  cabinet; the BFF only carries it through to the renderer. */
+  zoomBp?: number;
 }
 
 export interface PromoTargeting {
