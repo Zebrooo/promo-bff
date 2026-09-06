@@ -6,6 +6,7 @@ import type { BillingService } from '../../services/billing-service';
 import type { ImpressionStore } from '../../services/impression-store';
 import type { ClickStore } from '../../services/click-store';
 import type { ListingService } from '../../services/listing-service';
+import { promoSchema } from '../../services/catalogue-schema';
 import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
 
@@ -133,6 +134,32 @@ describe('handleSelectPromo', () => {
         imageUrl: 'https://example.com/x.png',
         action: { href: '/go', label: 'Go' },
         dismissible: true,
+      },
+    });
+  });
+
+  it('preserves descriptionColor from catalogue parsing through the selected promo response', async () => {
+    const ad = promoSchema.parse(makePromo({
+      id: 'coloured-description',
+      format: 'inline',
+      title: 'Need a part?',
+      description: 'Several shops will reply',
+      descriptionColor: '#606671',
+    }));
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [ad], persist: false }),
+    });
+
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+
+    expect(result).toEqual({
+      status: 'ok',
+      data: {
+        id: 'coloured-description',
+        format: 'inline',
+        title: 'Need a part?',
+        description: 'Several shops will reply',
+        descriptionColor: '#606671',
       },
     });
   });

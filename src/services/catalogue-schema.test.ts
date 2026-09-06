@@ -29,6 +29,15 @@ describe('promoSchema', () => {
     expect(() => promoSchema.parse(makePromo({ format: 'topline' }))).not.toThrow();
   });
 
+  it('preserves the optional descriptionColor creative field', () => {
+    const parsed = promoSchema.parse(makePromo({
+      format: 'topline',
+      descriptionColor: '#606671',
+    }));
+
+    expect(parsed.descriptionColor).toBe('#606671');
+  });
+
   it('accepts the custom format with a variant', () => {
     const parsed = promoSchema.parse(makePromo({ format: 'custom', variant: 'reklama-onboarding' }));
     expect(parsed.format).toBe('custom');
