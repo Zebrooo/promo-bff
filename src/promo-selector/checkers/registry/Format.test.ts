@@ -29,6 +29,24 @@ describe('FormatChecker', () => {
     expect(checker.check(ctx)).toBe(false);
   });
 
+  it("gates the promoline surface: promoline passes, inline does not", () => {
+    // Витрина запрашивает промолайн как ['promoline','inline'] (переходный
+    // период), но очередь, попросившая только ['promoline'], не должна ловить
+    // inline-промо из оверлея.
+    const promoline = makeCheckContext({ promo: makePromo({ format: 'promoline' }), formats: ['promoline'] });
+    const inline = makeCheckContext({ promo: makePromo({ format: 'inline' }), formats: ['promoline'] });
+    expect(checker.shouldSkip(promoline)).toBe(false);
+    expect(checker.check(promoline)).toBe(true);
+    expect(checker.check(inline)).toBe(false);
+  });
+
+  it("accepts both formats the promoline surface asks for (['promoline','inline'])", () => {
+    const formats = ['promoline', 'inline'];
+    expect(checker.check(makeCheckContext({ promo: makePromo({ format: 'promoline' }), formats }))).toBe(true);
+    expect(checker.check(makeCheckContext({ promo: makePromo({ format: 'inline' }), formats }))).toBe(true);
+    expect(checker.check(makeCheckContext({ promo: makePromo({ format: 'popup' }), formats }))).toBe(false);
+  });
+
   it('gates a single-format surface (topline) exactly', () => {
     const wanted = makeCheckContext({ promo: makePromo({ format: 'topline' }), formats: ['topline'] });
     const other = makeCheckContext({ promo: makePromo({ format: 'tooltip' }), formats: ['topline'] });

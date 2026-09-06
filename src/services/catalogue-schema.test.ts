@@ -29,6 +29,33 @@ describe('promoSchema', () => {
     expect(() => promoSchema.parse(makePromo({ format: 'topline' }))).not.toThrow();
   });
 
+  it('promoline парсится с тем же контентом, что и inline', () => {
+    const parsed = promoSchema.parse(makePromo({
+      format: 'promoline',
+      title: 'Продай быстрее',
+      description: 'Поднимите объявление в топ выдачи',
+      imageUrl: 'https://cdn.example.com/promo/promoline.png',
+      backgroundColor: '#0f172a',
+      textColor: '#ffffff',
+      descriptionColor: '#94a3b8',
+      action: { href: '/cabinet/promote', label: 'Подробнее' },
+      ctaColor: '#22c55e',
+      ctaTextColor: '#052e16',
+      textAlign: 'left',
+    }));
+
+    expect(parsed.format).toBe('promoline');
+    expect(parsed.description).toBe('Поднимите объявление в топ выдачи');
+    expect(parsed.imageUrl).toBe('https://cdn.example.com/promo/promoline.png');
+    expect(parsed.backgroundColor).toBe('#0f172a');
+    expect(parsed.textColor).toBe('#ffffff');
+    expect(parsed.descriptionColor).toBe('#94a3b8');
+    expect(parsed.action).toEqual({ href: '/cabinet/promote', label: 'Подробнее' });
+    expect(parsed.ctaColor).toBe('#22c55e');
+    expect(parsed.ctaTextColor).toBe('#052e16');
+    expect(parsed.textAlign).toBe('left');
+  });
+
   it('preserves the optional descriptionColor creative field', () => {
     const parsed = promoSchema.parse(makePromo({
       format: 'topline',
@@ -346,6 +373,7 @@ describe('queueSchema', () => {
  */
 const ALL_PROMO_FORMATS = [
   'inline',
+  'promoline',
   'popup',
   'fullscreen',
   'topline',
