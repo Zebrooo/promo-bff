@@ -2,7 +2,7 @@
 
 export type SubscriptionLevel = 'none' | 'plus' | 'premium';
 
-export type PromoFormat = 'inline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep' | 'custom';
+export type PromoFormat = 'inline' | 'promoline' | 'popup' | 'fullscreen' | 'topline' | 'banner' | 'divkit' | 'tooltip' | 'multistep' | 'custom';
 
 export type PromoOs = 'ios' | 'android';
 export type PromoEnvironment = 'browser' | 'telegram' | 'pwa' | 'app';

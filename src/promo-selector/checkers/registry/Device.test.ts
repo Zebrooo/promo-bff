@@ -43,6 +43,13 @@ describe('DeviceChecker', () => {
         expect(c.check(makeCheckContext({ device: 'touch', promo: makePromo({ format }) }))).toBe(true);
       }
     });
+    it('allows promoline everywhere — the row lives in every feed', () => {
+      // Рендерер о формате не знает (витрина мапит его на inline), поэтому
+      // promoline не десктоп-онли и не должен резаться на touch/app.
+      for (const device of ['desktop', 'touch', 'app'] as const) {
+        expect(c.check(makeCheckContext({ device, promo: makePromo({ format: 'promoline' }) }))).toBe(true);
+      }
+    });
   });
 
   describe("'app' device (WebView) — treated as touch-family", () => {

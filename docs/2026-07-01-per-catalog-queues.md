@@ -46,6 +46,14 @@ Surface → acceptable formats (from the current client-side filters):
 | overlay | `['popup','fullscreen','inline','divkit']` | `[]` |
 | tooltip | `['tooltip']` | `[]` |
 | onboarding | `['tooltip']` | `[]` |
+| promoline | `['promoline','inline']` | `[]` |
+
+Поверхность **promoline** (строка между объявлениями в лентах авто/шин/дисков,
+после четвёртой карточки) добавлена 2026-09; она запрашивает `select-promo` из
+очередей `transport-{web,touch,mobile}`. `inline` в её списке форматов —
+переходная совместимость со старыми записями (id с префиксом
+`parts-rfq-promoline-`), новые промо заводятся в кабинете как `promoline`.
+Рендереру формат не сообщается: витрина подменяет его на `inline` перед показом.
 
 `persist` (always-show) stops being a queue property and rides on per-request `skipCheckers` (already supported; topline already passes them). New catalog queues are all **non-persist**.
 

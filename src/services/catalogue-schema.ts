@@ -3,7 +3,12 @@ import type { Promo } from '../promo-selector/types';
 import { isValidNormalizedSearchTerm } from '../util/search-normalization';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
-export const promoFormatSchema = z.enum(['inline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
+/** Форматы промо в очередях. `promoline` — строка между объявлениями в лентах
+ *  каталога (после четвёртой карточки): контент тот же, что у `inline`, но это
+ *  отдельная поверхность, поэтому и отдельный формат — иначе такую запись
+ *  нельзя завести из кабинета. Рендерер о `promoline` не знает: витрина
+ *  подменяет формат на `inline` перед показом. */
+export const promoFormatSchema = z.enum(['inline', 'promoline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
 export const promoOsSchema = z.enum(['ios', 'android']);
