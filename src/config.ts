@@ -28,6 +28,8 @@ export interface AuthConfig {
   serviceName: string;
   /** Service ids allowed to call us (ticket `src`). */
   allowedSrc: string[];
+  /** Single trusted service allowed to use the high-impact push administration API. */
+  pushAdminSrc: string;
 }
 
 export interface SupabaseConfig {
@@ -71,6 +73,23 @@ export interface AiConfig {
   costLogPath: string;
 }
 
+export interface PushDeliveryConfig {
+  enabled: boolean;
+  /** Mounted Docker secret path. The API process never receives this mount. */
+  fcmServiceAccountFile: string;
+  /** Explicit pin: must equal service-account.project_id before the worker starts. */
+  fcmProjectId: string;
+  workerId: string;
+  pollIntervalMs: number;
+  campaignLeaseSeconds: number;
+  recipientLeaseSeconds: number;
+  batchSize: number;
+  concurrency: number;
+  maxRequestsPerSecond: number;
+  requestTimeoutMs: number;
+  supabaseTimeoutMs: number;
+}
+
 export interface AppConfig {
   port: number;
   host: string;
@@ -93,6 +112,7 @@ export interface AppConfig {
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
   ai: AiConfig;
+  pushDelivery: PushDeliveryConfig;
 }
 
 export interface SupportConfig {
@@ -126,6 +146,7 @@ export const config: AppConfig = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    pushAdminSrc: process.env.PUSH_ADMIN_ALLOWED_SRC?.trim() || 'promo-cabinet',
   },
   supabase: {
     url: (process.env.PROMO_SUPABASE_URL || process.env.AA_SUPABASE_URL || '').replace(/\/$/, ''),
@@ -187,5 +208,19 @@ export const config: AppConfig = {
     rateLimitPerHour: Number(process.env.AI_RATE_LIMIT_PER_HOUR ?? 30),
     cacheTtlMs: Number(process.env.AI_CACHE_TTL_MS ?? 10 * 60 * 1000),
     costLogPath: process.env.AI_COST_LOG_PATH ?? './tmp/ai-cost.log',
+  },
+  pushDelivery: {
+    enabled: process.env.PUSH_WORKER_ENABLED === 'true',
+    fcmServiceAccountFile: process.env.FCM_SERVICE_ACCOUNT_FILE ?? '',
+    fcmProjectId: process.env.FCM_PROJECT_ID ?? '',
+    workerId: process.env.PUSH_WORKER_ID ?? process.env.HOSTNAME ?? 'promo-push-worker',
+    pollIntervalMs: Number(process.env.PUSH_WORKER_POLL_MS ?? 2000),
+    campaignLeaseSeconds: Number(process.env.PUSH_CAMPAIGN_LEASE_SECONDS ?? 180),
+    recipientLeaseSeconds: Number(process.env.PUSH_RECIPIENT_LEASE_SECONDS ?? 300),
+    batchSize: Number(process.env.PUSH_WORKER_BATCH_SIZE ?? 100),
+    concurrency: Number(process.env.PUSH_WORKER_CONCURRENCY ?? 8),
+    maxRequestsPerSecond: Number(process.env.PUSH_WORKER_MAX_RPS ?? 50),
+    requestTimeoutMs: Number(process.env.FCM_REQUEST_TIMEOUT_MS ?? 10000),
+    supabaseTimeoutMs: Number(process.env.PUSH_SUPABASE_TIMEOUT_MS ?? 10000),
   },
 };

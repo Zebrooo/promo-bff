@@ -70,6 +70,47 @@ services:
         max-file: "5"
         compress: "true"
 
+  # Массовая отправка намеренно вынесена из Fastify/Next request lifecycle:
+  # только этот приватный процесс получает FCM service account и лизит задания
+  # из БД. Портов и Traefik labels нет — извне worker недоступен.
+  promo-push-worker:
+    container_name: promo-push-worker
+    image: promo-bff:latest
+    restart: always
+    depends_on:
+      promo-bff:
+        condition: service_healthy
+    command: ["node", "--import", "tsx", "src/push-worker.ts"]
+    environment:
+      # Kill switch defaults off. Enable only after the DB migration, FCM
+      # credential and project pin have all been verified.
+      PUSH_WORKER_ENABLED: "${PUSH_WORKER_ENABLED:-false}"
+      FCM_SERVICE_ACCOUNT_FILE: /run/secrets/fcm_service_account
+      FCM_PROJECT_ID: "${FCM_PROJECT_ID:-}"
+      AA_SUPABASE_URL: "${AA_SUPABASE_URL:?AA_SUPABASE_URL must be set in .env}"
+      AA_SUPABASE_SERVICE_ROLE_KEY: "${AA_SUPABASE_SERVICE_ROLE_KEY:?AA_SUPABASE_SERVICE_ROLE_KEY must be set in .env}"
+      PUSH_SUPABASE_TIMEOUT_MS: "${PUSH_SUPABASE_TIMEOUT_MS:-10000}"
+      PUSH_WORKER_POLL_MS: "${PUSH_WORKER_POLL_MS:-2000}"
+      PUSH_CAMPAIGN_LEASE_SECONDS: "${PUSH_CAMPAIGN_LEASE_SECONDS:-180}"
+      PUSH_RECIPIENT_LEASE_SECONDS: "${PUSH_RECIPIENT_LEASE_SECONDS:-300}"
+      PUSH_WORKER_BATCH_SIZE: "${PUSH_WORKER_BATCH_SIZE:-100}"
+      PUSH_WORKER_CONCURRENCY: "${PUSH_WORKER_CONCURRENCY:-8}"
+      PUSH_WORKER_MAX_RPS: "${PUSH_WORKER_MAX_RPS:-50}"
+      FCM_REQUEST_TIMEOUT_MS: "${FCM_REQUEST_TIMEOUT_MS:-10000}"
+    secrets:
+      - fcm_service_account
+    networks:
+      - supabase-aa
+    labels:
+      - traefik.enable=false
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
 networks:
   web:
     external: true
@@ -80,3 +121,9 @@ networks:
 secrets:
   node_auth_token:
     environment: NODE_AUTH_TOKEN
+  # Host path is read by Compose; inside the worker it is mounted at the fixed
+  # /run/secrets path above. promo-bff does not list this secret and cannot read it.
+  fcm_service_account:
+    # /dev/null lets the API and a fail-closed worker start when credentials
+    # have not been provisioned yet; the worker reports itself disabled.
+    file: "${FCM_SERVICE_ACCOUNT_FILE:-/dev/null}"

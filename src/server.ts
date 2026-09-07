@@ -15,6 +15,8 @@ import { createErrorStore, type ErrorStore } from './services/error-store';
 import { createReferralConfigService, type ReferralConfigService } from './services/referral-config-service';
 import { createAnalyticsStore, type AnalyticsStore } from './services/analytics-store';
 import { createAaAdminStore, type AaAdminStore } from './services/aa-admin-store';
+import { createPushCampaignStore, type PushCampaignStore } from './services/push-campaign-store';
+import { registerPushAdminRoutes } from './push-admin';
 import { createCheckerStatsService, type CheckerStatsService } from './services/checker-stats';
 import { createSelectionTraceService, type SelectionTraceService } from './services/selection-trace';
 import { withTimeout } from './util/with-timeout';
@@ -71,6 +73,8 @@ export interface BuildServerOptions {
         leadStore: LeadStore;
         /** test/prod пара — держим оба стора, роут резолвит нужный по body.env. */
         aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
+        /** Durable push campaign admin stores. FCM credentials never enter this process. */
+        pushCampaignStores: Record<'test' | 'prod', PushCampaignStore>;
       }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
@@ -303,6 +307,17 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     test: createAaAdminStore(config.aaTestSupabase),
     prod: createAaAdminStore(config.aaSupabase),
   };
+  const pushCampaignStores: Record<'test' | 'prod', PushCampaignStore> =
+    opts.deps?.pushCampaignStores ?? {
+      test: createPushCampaignStore({
+        ...config.aaTestSupabase,
+        timeoutMs: config.pushDelivery.supabaseTimeoutMs,
+      }),
+      prod: createPushCampaignStore({
+        ...config.aaSupabase,
+        timeoutMs: config.pushDelivery.supabaseTimeoutMs,
+      }),
+    };
 
   app.post('/models', async (request, reply) => {
     // 1. Parse JSON — Fastify has already parsed the body and auto-400s malformed JSON.
@@ -1029,6 +1044,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       app.log.error({ err }, 'POST /aa-admin/experiments/variant-weights failed');
       return reply.code(502).send({ error: 'aa_admin_unavailable' });
     }
+  });
+
+  // Campaign administration is ticket-authenticated and durable. These handlers
+  // only validate and execute short Supabase/RPC operations; delivery belongs to
+  // the isolated promo-push-worker process below, never to the Fastify lifecycle.
+  registerPushAdminRoutes({
+    app,
+    authenticator,
+    stores: pushCampaignStores,
+    allowedClientId: config.auth.pushAdminSrc,
   });
 
   // Liveness + readiness probes (unauthenticated — for the orchestrator, not data).

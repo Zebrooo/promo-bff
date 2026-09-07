@@ -180,6 +180,70 @@ The proxy applies only to the text and image OpenRouter clients, never to
 Supabase, S3, or other BFF traffic. Production must provide a proxy URL reachable
 from the `promo-bff` container.
 
+### Durable push campaigns
+
+The cabinet uses ticket-authenticated, POST-only `/push-admin/campaigns/*`
+endpoints to create, preview, schedule, inspect, and cancel campaigns. API
+handlers only write/read durable Supabase state and return immediately; they
+never call Firebase. Every mutation is fenced by a campaign revision and a
+UUID command id, and queueing additionally confirms the frozen audience digest,
+payload hash, exact recipient count, and configured maximum audience.
+Campaign listing always includes every nonterminal campaign, independently of
+the requested `limit`; that limit applies only to recent terminal history. The
+BFF reads nonterminal rows in explicit pages and fails closed above 5,000 active
+campaigns instead of silently hiding an older scheduled campaign.
+
+Delivery runs in the separate `promo-push-worker` Compose service. It has no
+public port and is the only container that receives the Firebase credential.
+Before starting it in production:
+
+1. Apply the matching Abkhaz Auto Supabase push-campaign migration.
+2. Add `promo-cabinet` to `PROMO_ALLOWED_SRC` and set
+   `PUSH_ADMIN_ALLOWED_SRC=promo-cabinet`. A valid ticket from any other
+   globally allowed service is rejected by the push administration routes.
+3. Set `FCM_PROJECT_ID` in `.env` to the expected Firebase project id.
+4. Export `FCM_SERVICE_ACCOUNT_FILE` for Docker Compose as the host path to the
+   service-account JSON. Compose mounts it read-only at
+   `/run/secrets/fcm_service_account`; do not put the JSON itself in `.env`.
+5. Build and start both services with the worker kill switch still off:
+   `docker compose up -d --build`.
+6. Verify the migration, mounted credential and pinned project, then set
+   `PUSH_WORKER_ENABLED=true` and recreate `promo-push-worker`.
+
+If the Firebase project id or credential file is absent/invalid, Compose still
+starts the BFF. The worker stays fail-closed, leases no campaigns, and reports
+itself disabled until credentials are provisioned and the worker is restarted.
+The Compose kill switch defaults to `false`; queueing also returns
+`503 worker_unavailable` unless the worker has a fresh healthy heartbeat.
+The initial rollout intentionally has no TEST delivery worker: TEST can create
+and prepare audience previews, but queueing remains `503 worker_unavailable`.
+Enable TEST delivery only after provisioning a separate worker, Firebase
+project/credential, and heartbeat for that isolated environment.
+
+Three consecutive system-level delivery outcomes (FCM 429/5xx, ambiguous
+network/timeout results, or a transient OAuth refresh failure after FCM 401)
+open a fail-closed circuit. The current campaign is
+failed, claimed-but-unstarted recipients are closed without sending, and the
+worker remains unhealthy until an operator investigates and restarts it. No
+notification attempt is retried; only the already in-flight concurrency window
+can complete while the circuit is being detected.
+Any ambiguous storage failure after a campaign has been claimed—including a
+lost `claimRecipients` response or a failed terminal outcome write—also latches
+the worker unhealthy until restart. It does not falsely fail the campaign or
+claim another window; unresolved claims expire to `unknown` for operator review.
+
+Optional worker tuning variables are `PUSH_WORKER_POLL_MS`,
+`PUSH_CAMPAIGN_LEASE_SECONDS`, `PUSH_RECIPIENT_LEASE_SECONDS`,
+`PUSH_WORKER_BATCH_SIZE`, `PUSH_WORKER_CONCURRENCY`, `PUSH_WORKER_MAX_RPS`, and
+`PUSH_SUPABASE_TIMEOUT_MS`, and `FCM_REQUEST_TIMEOUT_MS`. The worker claims no
+more than one concurrency window at a time and supports the newest token plus
+one exact-UNREGISTERED fallback. At startup it derives a worst-case delivery
+budget from the DB timeout, FCM timeout, rate limit, and concurrency, then
+rejects campaign or recipient leases shorter than that budget. Defaults are
+conservative. A missing/invalid credential or mismatched project id is
+fail-closed: no campaign is claimed and the cabinet reports the worker
+unhealthy/disabled.
+
 ```bash
 curl -X POST http://localhost:3000/models \
   -H 'Content-Type: application/json' \
