@@ -1,6 +1,7 @@
 import type { Promo } from '../../promo-selector/types';
 import { selectPromoList, type SelectionTrace } from '../../promo-selector';
 import {
+  loadAdvertiserForSelection,
   loadBehaviorForSelection,
   loadSearchHistoryForSelection,
   loadWalletDataForSelection,
@@ -48,10 +49,11 @@ export async function handleSelectPromoList(
   const skip = [...(params.skipCheckers ?? []), 'chain', ...(persist ? ['limit', 'cooldown'] : [])];
   // Параллельно, как в handleSelectPromo: три опциональные загрузки не должны
   // складываться последовательно внутри бюджета сайта 800 мс.
-  const [searchHistory, wallet, behavior] = await Promise.all([
+  const [searchHistory, wallet, behavior, advertiser] = await Promise.all([
     loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo-list'),
     loadWalletDataForSelection(params, promos, skip, deps, 'select-promo-list'),
     loadBehaviorForSelection(params, promos, skip, deps, 'select-promo-list'),
+    loadAdvertiserForSelection(params, promos, skip, deps, 'select-promo-list'),
   ]);
 
   let steps: Promo[];
@@ -79,6 +81,7 @@ export async function handleSelectPromoList(
         walletBalanceKopecks: wallet.walletBalanceKopecks,
         walletBalanceUnavailable: wallet.walletBalanceUnavailable,
         walletMovementByWindow: wallet.walletMovementByWindow,
+        advertiser,
       },
       {
         skip,

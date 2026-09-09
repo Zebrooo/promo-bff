@@ -21,6 +21,7 @@ import { withTimeout } from './util/with-timeout';
 import { createListingService } from './services/listing-service';
 import { createSearchHistoryService } from './services/search-history-service';
 import { createBehaviorSignalService } from './services/behavior-signal-service';
+import { createAdvertiserSignalService } from './services/advertiser-signal-service';
 import { createPurchaseLedgerService } from './services/purchase-ledger-service';
 import { createCampaignService } from './services/campaign-service';
 import { createCampaignReviewService } from './services/campaign-review-service';
@@ -181,6 +182,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     purchaseLedgerService: createPurchaseLedgerService(),
     balanceService: createBalanceService(config.aaSupabase),
     behaviorSignalService: createBehaviorSignalService(),
+    // ad_campaigns + user_action_events живут в abkhaz-auto Supabase — явно
+    // aaSupabase, как у balanceService выше.
+    advertiserSignalService: createAdvertiserSignalService(config.aaSupabase),
     checkerStats,
     selectionTrace,
     logger: app.log,

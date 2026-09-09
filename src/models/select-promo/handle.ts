@@ -10,15 +10,17 @@ import type { SelectionTraceService } from '../../services/selection-trace';
 import type { Promo } from '../../promo-selector/types';
 import { selectPromo, type SelectionTrace } from '../../promo-selector';
 import { resolveUserIdentity, type Advertisement, type ModelResult, type SelectPromoParams } from './types';
-import type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal } from '../../promo-selector/checkers';
+import type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal, AdvertiserSignal } from '../../promo-selector/checkers';
 import { hasSearchRule } from '../../promo-selector/checkers/registry/Search';
 import type { PurchaseLedgerService } from '../../services/purchase-ledger-service';
 import type { BalanceService } from '../../services/balance-service';
 import type { BehaviorSignalService } from '../../services/behavior-signal-service';
+import type { AdvertiserSignalService } from '../../services/advertiser-signal-service';
 import { hasPurchaseRule } from '../../promo-selector/checkers/registry/Purchases';
 import { hasBalanceRule } from '../../promo-selector/checkers/registry/Balance';
 import { hasInterestRule } from '../../promo-selector/checkers/registry/Interest';
 import { hasHotBuyerRule } from '../../promo-selector/checkers/registry/HotBuyer';
+import { hasAdvertiserRule, needsAdvertiserWallet, wizardWindowDaysFor } from '../../promo-selector/checkers/registry/Advertiser';
 
 /** Minimal logger shape (Fastify's logger satisfies it; tests pass nothing). */
 export interface Logger {
@@ -38,6 +40,7 @@ export interface SelectPromoDeps {
   purchaseLedgerService: PurchaseLedgerService;
   balanceService: BalanceService;
   behaviorSignalService: BehaviorSignalService;
+  advertiserSignalService: AdvertiserSignalService;
   logger?: Logger;
   /** Checker-observability sink (promo_checker_stats aggregator). Optional: absent in tests. */
   checkerStats?: CheckerStatsService;
@@ -107,14 +110,17 @@ export async function loadWalletDataForSelection(
 
   const needsPurchases = !skip.includes('purchases') && promos.some(hasPurchaseRule);
   const needsBalance = !skip.includes('balance') && promos.some(hasBalanceRule);
-  if (!needsPurchases && !needsBalance) return empty;
+  // Ось «Рекламодатель» смотрит на тот же рекламный кошелёк (ledger_accounts,
+  // kind=liability): один read на оба чекера.
+  const needsAdWallet = !skip.includes('advertiser') && promos.some(needsAdvertiserWallet);
+  if (!needsPurchases && !needsBalance && !needsAdWallet) return empty;
 
   const purchaseLookbackDays = needsPurchases
     ? Math.max(...promos.filter(hasPurchaseRule).map((p) => p.targeting.purchases!.lookbackDays ?? 30))
     : 0;
-  const needsCurrentBalance = needsBalance && promos.some(
+  const needsCurrentBalance = needsAdWallet || (needsBalance && promos.some(
     (p) => hasBalanceRule(p) && (p.targeting.balance!.currentAbove !== undefined || p.targeting.balance!.currentBelow !== undefined),
-  );
+  ));
   // Movement is pre-aggregated server-side per window, so (unlike purchases) it
   // can't be re-filtered after the fact — fetch one value PER DISTINCT window any
   // movement-gating promo actually requests (undefined = all-time bucket), not a
@@ -209,6 +215,44 @@ export async function loadBehaviorForSelection(
 }
 
 /**
+ * Load the advertiser signal (ad campaigns + campaign wizard events) only when
+ * this walk can actually evaluate an advertiser rule — близнец
+ * loadBehaviorForSelection. Only a proven account identity has campaigns:
+ * guests/anonymous ids skip the read (the checker fails them anyway). The
+ * wizard window is the queue-wide max across advertiser rules (each checker
+ * re-filters to its own); 0 = no promo asks about the wizard → events not read.
+ * Failure → undefined: advertiser-targeted promos fail closed, generic
+ * candidates in the same queue pass.
+ */
+export async function loadAdvertiserForSelection(
+  params: SelectPromoParams,
+  promos: Promo[],
+  skip: string[],
+  deps: SelectPromoDeps,
+  logPrefix: 'select-promo' | 'select-promo-list',
+): Promise<AdvertiserSignal | undefined> {
+  if (skip.includes('advertiser') || !params.userId) return undefined;
+  const targeted = promos.filter(hasAdvertiserRule);
+  if (targeted.length === 0) return undefined;
+  const identity = resolveUserIdentity(params.user);
+  if (!identity.isAuthorized || identity.identityKind !== 'account') return undefined;
+
+  const wizardLookbackDays = Math.max(0, ...targeted.map(wizardWindowDaysFor));
+  try {
+    return await deps.advertiserSignalService.getSignal(params.userId, {
+      wizardLookbackDays,
+      now: deps.now?.() ?? new Date(),
+    });
+  } catch (err) {
+    deps.logger?.error(
+      { error: err instanceof Error ? err.message : 'unknown error' },
+      `${logPrefix}: advertiser signal unavailable`,
+    );
+    return undefined;
+  }
+}
+
+/**
  * Strip a Promo to the renderable Advertisement (server-only selection fields
  * removed). Shared by handleSelectPromo + handleSelectPromoList so the strip
  * can't drift from the Advertisement Omit.
@@ -271,12 +315,13 @@ export async function handleSelectPromo(
   }
 
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
-  // Три опциональные загрузки — параллельно: последовательно худший случай был
-  // бы 3×300 мс и не влез бы в бюджет сайта 800 мс. Ошибки каждая ловит внутри.
-  const [searchHistory, wallet, behavior] = await Promise.all([
+  // Четыре опциональные загрузки — параллельно: последовательно худший случай
+  // был бы 4×300 мс и не влез бы в бюджет сайта 800 мс. Ошибки каждая ловит внутри.
+  const [searchHistory, wallet, behavior, advertiser] = await Promise.all([
     loadSearchHistoryForSelection(params, promos, skip, deps, 'select-promo'),
     loadWalletDataForSelection(params, promos, skip, deps, 'select-promo'),
     loadBehaviorForSelection(params, promos, skip, deps, 'select-promo'),
+    loadAdvertiserForSelection(params, promos, skip, deps, 'select-promo'),
   ]);
 
   let promo: Promo | null;
@@ -304,6 +349,7 @@ export async function handleSelectPromo(
         walletBalanceKopecks: wallet.walletBalanceKopecks,
         walletBalanceUnavailable: wallet.walletBalanceUnavailable,
         walletMovementByWindow: wallet.walletMovementByWindow,
+        advertiser,
       },
       {
         skip,

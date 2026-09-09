@@ -60,6 +60,30 @@ export interface CheckContext {
   walletBalanceUnavailable?: boolean;
   /** Net wallet movement per requested window. Key = the rule's `movementLookbackDays` (undefined key = all-time). */
   walletMovementByWindow?: Map<number | undefined, number>;
+  /** Сигнал рекламодателя (РК + мастер подачи), преднагруженный model
+   *  handler'ом. undefined = не загружали / не смогли → advertiser-промо fail closed. */
+  advertiser?: AdvertiserSignal;
+}
+
+/** Агрегаты по рекламным кампаниям зрителя и мастеру подачи РК
+ *  (services/advertiser-signal-service.ts). Сырые строки чекер не видит. */
+export interface AdvertiserSignal {
+  /** Различные текущие статусы РК рекламодателя (ad_campaigns.status). */
+  statuses: string[];
+  /** Есть РК со status='active'. */
+  hasActive: boolean;
+  /** Дата последнего запуска среди запускавшихся РК, ISO; null = никогда не запускал. */
+  lastLaunchedAt: string | null;
+  /** Сумма spent_kopecks по всем РК. */
+  spentKopecks: number;
+  /** Есть запускавшаяся РК с исчерпанным общим или дневным (сегодня, МСК) бюджетом. */
+  budgetExhausted: boolean;
+  /** Ближайшая дата окончания (ends_at ≥ now) среди активных РК, ISO; null = нет. */
+  activeEndsAt: string | null;
+  /** События мастера подачи (form_id='ad_campaign') за wizardWindowDays, новые первыми. */
+  wizardEvents: { kind: 'start' | 'submit'; at: string }[];
+  /** Окно, за которое загружены wizardEvents, дней. 0 = не загружали. */
+  wizardWindowDays: number;
 }
 
 export interface SearchHistoryEntry {
