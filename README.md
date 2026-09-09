@@ -187,6 +187,27 @@ curl -X POST http://localhost:3000/models \
   -d '{"models":["select-promo"],"params":{"userId":"user123","context":{"platform":"web","locale":"ru"}}}'
 ```
 
+## Пуши админам о новых рекламных кампаниях
+
+Кампании рекламодателей создаёт витрина (ЛК «Реклама» abkhaz-auto) прямо в
+своей Supabase (`ad_campaigns`). Поллер (`src/services/new-campaign-watcher.ts`,
+интервал `NEW_CAMPAIGN_POLL_MS`, по умолчанию 60 с; `0` — выключен) читает
+кампании со статусами `active`/`pending` и о каждой ещё не виденной шлёт
+админам промо-кабинета уведомление. «Уже видели» хранится в S3
+(`seen-campaigns.json`, рядом с `promos.json`); первый запуск без файла —
+bootstrap: всё существующее помечается виденным без уведомлений. На аукцион
+это не влияет. `POST /new-campaigns/recent` (service-ticket, как `/leads`)
+отдаёт последние новые кампании для страницы кабинета.
+
+Каналы уведомлений (оба опциональны, включаются конфигом):
+
+| env | назначение |
+| --- | --- |
+| `WEB_PUSH_VAPID_PUBLIC_KEY` / `WEB_PUSH_VAPID_PRIVATE_KEY` | пара VAPID (`npx web-push generate-vapid-keys`); публичный ключ тот же, что `WEB_PUSH_VAPID_PUBLIC_KEY` у кабинета. Подписки браузеров админов кабинет пишет в S3 (`push-subscriptions.json`), BFF их читает при рассылке. Web Push реализован на `node:crypto` (`src/services/web-push.ts`), без внешних пакетов. |
+| `WEB_PUSH_SUBJECT` | VAPID `sub` — `mailto:` или https-URL владельца (дефолт — origin витрины). |
+| `ADMIN_TELEGRAM_BOT_TOKEN` / `ADMIN_TELEGRAM_CHAT_IDS` | бот и чаты (через запятую) для Telegram-уведомлений. |
+| `PROMO_CABINET_URL` | публичный URL кабинета — ссылка «Открыть» в уведомлении. |
+
 ## Adding a model
 
 Write `validate` + `handle`, then add one entry to

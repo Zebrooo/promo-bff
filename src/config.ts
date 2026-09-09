@@ -90,9 +90,38 @@ export interface AppConfig {
    *  задеть прод, работая со стендом (и наоборот). */
   aaTestSupabase: SupabaseConfig;
   support: SupportConfig;
+  /** Уведомления админам о новых рекламных кампаниях (ad_campaigns). */
+  newCampaignWatch: NewCampaignWatchConfig;
+  adminNotify: AdminNotifyConfig;
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
   ai: AiConfig;
+}
+
+export interface NewCampaignWatchConfig {
+  /** Как часто опрашивать ad_campaigns на предмет новых кампаний (мс).
+   *  0 = поллер выключен (пуши о новых кампаниях не идут). */
+  pollIntervalMs: number;
+  /** Публичный URL промо-кабинета (без trailing /) — ссылка «Открыть» в
+   *  уведомлении админам. Пусто = уведомление без ссылки. */
+  cabinetUrl: string;
+}
+
+export interface AdminNotifyConfig {
+  /** Web Push (VAPID). Ключи — base64url, как выдаёт `npx web-push
+   *  generate-vapid-keys`. Пусто = канал выключен. Подписки админов пишет
+   *  кабинет в S3 (push-subscriptions.json), BFF их только читает. */
+  webPush: {
+    vapidPublicKey: string;
+    vapidPrivateKey: string;
+    /** VAPID sub: mailto: или https-URL владельца. */
+    subject: string;
+  };
+  /** Telegram-бот для админов. Пусто = канал выключен. */
+  telegram: {
+    botToken: string;
+    chatIds: string[];
+  };
 }
 
 export interface SupportConfig {
@@ -163,6 +192,24 @@ export const config: AppConfig = {
     // Writes to abkhaz-auto Supabase cross-server (promo → apsoft1) — must NOT
     // reuse the ad system's fast-fail 2.5s timeout, or the bot reply is lost.
     supabaseTimeoutMs: Number(process.env.SUPPORT_SUPABASE_TIMEOUT_MS ?? 10000),
+  },
+  newCampaignWatch: {
+    pollIntervalMs: Number(process.env.NEW_CAMPAIGN_POLL_MS ?? 60_000),
+    cabinetUrl: (process.env.PROMO_CABINET_URL ?? '').replace(/\/$/, ''),
+  },
+  adminNotify: {
+    webPush: {
+      vapidPublicKey: process.env.WEB_PUSH_VAPID_PUBLIC_KEY ?? '',
+      vapidPrivateKey: process.env.WEB_PUSH_VAPID_PRIVATE_KEY ?? '',
+      subject: process.env.WEB_PUSH_SUBJECT ?? 'https://abkhaz-auto.apsoftgroup.ru',
+    },
+    telegram: {
+      botToken: process.env.ADMIN_TELEGRAM_BOT_TOKEN ?? '',
+      chatIds: (process.env.ADMIN_TELEGRAM_CHAT_IDS ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
   },
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY ?? '',

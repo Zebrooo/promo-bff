@@ -29,6 +29,18 @@ export function queueKey(name: string): string {
   return `${config.s3.keyPrefix}queue-${name}.json`;
 }
 
+/** Какие рекламные кампании BFF уже видел (чтобы слать пуш о новой один
+ *  раз). Пишет и читает только BFF — см. new-campaign-watcher.ts. */
+export function seenCampaignsKey(): string {
+  return `${config.s3.keyPrefix}seen-campaigns.json`;
+}
+
+/** Web Push-подписки админов кабинета. Пишет КАБИНЕТ (тот же бакет и
+ *  префикс, что у promos.json), BFF только читает при рассылке уведомлений. */
+export function pushSubscriptionsKey(): string {
+  return `${config.s3.keyPrefix}push-subscriptions.json`;
+}
+
 /** True when an S3 error means "the object does not exist yet". */
 export function isNoSuchKey(err: unknown): boolean {
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };

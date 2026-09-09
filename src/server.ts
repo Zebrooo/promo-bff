@@ -23,6 +23,9 @@ import { createSearchHistoryService } from './services/search-history-service';
 import { createBehaviorSignalService } from './services/behavior-signal-service';
 import { createPurchaseLedgerService } from './services/purchase-ledger-service';
 import { createCampaignService } from './services/campaign-service';
+import { createCampaignReviewService } from './services/campaign-review-service';
+import { createAdminNotifierFromConfig } from './services/admin-notifier';
+import { createNewCampaignWatcher, createS3SeenCampaignsStore, type NewCampaignWatcher } from './services/new-campaign-watcher';
 import { createBalanceService } from './services/balance-service';
 import { isModelName, modelRegistry } from './models/registry';
 import type { SelectPromoDeps } from './models/select-promo/handle';
@@ -71,10 +74,16 @@ export interface BuildServerOptions {
         leadStore: LeadStore;
         /** test/prod пара — держим оба стора, роут резолвит нужный по body.env. */
         aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
+        /** Пуши админам о новых кампаниях рекламодателей (/new-campaigns/*). */
+        newCampaignWatcher: NewCampaignWatcher;
       }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
   logger?: boolean;
+  /** Запускать поллер новых кампаний (см. new-campaign-watcher.ts). Только
+   *  для реального процесса (server.ts как entrypoint); тесты и embedding
+   *  не трогают сеть по таймеру. */
+  startNewCampaignWatcher?: boolean;
 }
 
 /**
@@ -175,6 +184,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Чтение лидов для кабинета — вне SelectPromoDeps: к выбору промо стор
   // отношения не имеет, его единственный потребитель — GET /leads ниже.
   const leadStore: LeadStore = opts.deps?.leadStore ?? createLeadStore();
+
+  // Пуши админам о новых рекламных кампаниях витрины: поллер смотрит
+  // ad_campaigns, каждую ещё не виденную кампанию отправляет в уведомление.
+  // На выдачу аукциона не влияет.
+  const newCampaignWatcher: NewCampaignWatcher = opts.deps?.newCampaignWatcher ?? createNewCampaignWatcher({
+    review: createCampaignReviewService(),
+    store: createS3SeenCampaignsStore(),
+    notifier: createAdminNotifierFromConfig(config.adminNotify, app.log),
+    logger: app.log,
+    cabinetUrl: config.newCampaignWatch.cabinetUrl,
+  });
+  if (opts.startNewCampaignWatcher) {
+    newCampaignWatcher.start(config.newCampaignWatch.pollIntervalMs);
+    app.addHook('onClose', async () => { newCampaignWatcher.stop(); });
+  }
 
   const auctionDeps: AuctionDeps = {
     campaignService: createCampaignService(),
@@ -1031,6 +1055,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
   });
 
+  // ── Новые рекламные кампании (промо-кабинет) ──────────────────────────
+  // Последние кампании, о которых уходили пуши, + какие каналы настроены.
+  // Та же авторизация service-ticket'ом, что у /leads и /aa-admin/*.
+  app.post('/new-campaigns/recent', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    if (!newCampaignWatcher.configured) return reply.code(503).send({ error: 'campaigns_not_configured' });
+    try {
+      return reply.code(200).send(await newCampaignWatcher.recent());
+    } catch (err) {
+      app.log.error({ err }, 'POST /new-campaigns/recent failed');
+      return reply.code(502).send({ error: 'campaigns_unavailable' });
+    }
+  });
+
   // Liveness + readiness probes (unauthenticated — for the orchestrator, not data).
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/ready', async (_request, reply) => {
@@ -1051,7 +1090,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 const invokedDirectly =
   process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  const app = buildServer();
+  const app = buildServer({ startNewCampaignWatcher: true });
   const processErrorStore = createErrorStore();
   const recordFatal = (err: unknown, kind: string) =>
     processErrorStore
