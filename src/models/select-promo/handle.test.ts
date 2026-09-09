@@ -208,6 +208,18 @@ describe('handleSelectPromo', () => {
     });
   });
 
+  it('hands promoline afterListings to the client (renderable, NOT server-only)', async () => {
+    // Позиция строки в ленте читается витриной из Advertisement
+    // (@zebrooo/promo-renderer 0.16.0), поэтому strip её не трогает.
+    const ad = makePromo({ id: 'pl-8', format: 'promoline', title: 'Строка', afterListings: 8 });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result).toEqual({
+      status: 'ok',
+      data: { id: 'pl-8', format: 'promoline', title: 'Строка', afterListings: 8 },
+    });
+  });
+
   it('hands custom-format variant to the client (variant is renderable, NOT server-only)', async () => {
     const ad = makePromo({ id: 'cst-1', format: 'custom', title: 'Onboarding', variant: 'reklama-onboarding' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });

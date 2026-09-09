@@ -3,14 +3,16 @@ import type { PromoFormat } from '../../types';
 
 /**
  * Formats the renderer only supports on desktop. MUST mirror FORMATS_BY_DEVICE in
- * @zebrooo/promo-renderer (src/model.ts): touch = inline|popup|fullscreen|divkit,
- * desktop additionally = topline|tooltip. Keep in sync when the renderer's device
- * matrix changes. `promoline` is absent from that mirror on purpose: the renderer
- * doesn't know the format at all — the storefront maps it onto `inline` before
- * rendering — and the promoline row exists on every device, so it is NOT
- * desktop-only. On touch these formats render to nothing, so we drop such promos
- * server-side and let select-promo fall through to the next eligible promo —
- * otherwise a desktop-only promo at the queue head = empty slot with no fallback.
+ * @zebrooo/promo-renderer (src/model.ts, 0.16.0): touch = inline|promoline|popup|
+ * fullscreen|divkit|multistep|custom, desktop additionally = topline|tooltip.
+ * Keep in sync when the renderer's device matrix changes. The BFF cannot import
+ * the matrix from the package itself: its bundle pulls React/react-dom at module
+ * top level (UI peer deps a Node service does not carry), so this hand-kept set
+ * stays. `promoline` is a native renderer format on every device since 0.16.0,
+ * so it is NOT desktop-only. On touch these formats render to nothing, so we
+ * drop such promos server-side and let select-promo fall through to the next
+ * eligible promo — otherwise a desktop-only promo at the queue head = empty slot
+ * with no fallback.
  */
 const DESKTOP_ONLY_FORMATS: ReadonlySet<PromoFormat> = new Set<PromoFormat>(['topline', 'tooltip']);
 

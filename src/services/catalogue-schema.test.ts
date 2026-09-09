@@ -56,6 +56,39 @@ describe('promoSchema', () => {
     expect(parsed.textAlign).toBe('left');
   });
 
+  /** afterListings — позиция строки promoline в ленте (4..50). Плоская схема
+   *  BFF вырезала бы неизвестный ключ при парсе пула, а витрина читает поле из
+   *  Advertisement — поэтому оно объявлено явно и только для promoline. */
+  describe('afterListings (promoline, позиция в ленте)', () => {
+    it.each([4, 8, 50])('accepts %s on promoline and keeps it', (afterListings) => {
+      const parsed = promoSchema.parse(makePromo({ format: 'promoline', afterListings }));
+      expect(parsed.afterListings).toBe(afterListings);
+    });
+
+    it.each([3, 0, 51, 2.5])('rejects %s (bounds 4..50, integer)', (afterListings) => {
+      expect(() => promoSchema.parse(makePromo({ format: 'promoline', afterListings }))).toThrow();
+    });
+
+    it('is absent when not set (витрина берёт умолчание — четвёртую карточку)', () => {
+      expect(promoSchema.parse(makePromo({ format: 'promoline' }))).not.toHaveProperty('afterListings');
+    });
+
+    it('rejects afterListings on non-promoline formats (mirror of the cabinet union strip)', () => {
+      for (const format of ['inline', 'popup', 'topline'] as const) {
+        expect(() => promoSchema.parse(makePromo({ format, afterListings: 8 })), format).toThrow();
+      }
+    });
+
+    it('parsePoolLeniently drops only the promo with a bad afterListings', () => {
+      const { promos, rejected } = parsePoolLeniently([
+        makePromo({ id: 'ok', format: 'promoline', afterListings: 6 }),
+        makePromo({ id: 'bad', format: 'promoline', afterListings: 2 }),
+      ]);
+      expect(promos.map((p) => p.id)).toEqual(['ok']);
+      expect(rejected.map((r) => r.promoId)).toEqual(['bad']);
+    });
+  });
+
   it('preserves the optional descriptionColor creative field', () => {
     const parsed = promoSchema.parse(makePromo({
       format: 'topline',

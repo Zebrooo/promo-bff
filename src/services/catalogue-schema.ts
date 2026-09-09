@@ -4,10 +4,11 @@ import { isValidNormalizedSearchTerm } from '../util/search-normalization';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
 /** Форматы промо в очередях. `promoline` — строка между объявлениями в лентах
- *  каталога (после четвёртой карточки): контент тот же, что у `inline`, но это
- *  отдельная поверхность, поэтому и отдельный формат — иначе такую запись
- *  нельзя завести из кабинета. Рендерер о `promoline` не знает: витрина
- *  подменяет формат на `inline` перед показом. */
+ *  каталога (после N-й органической карточки — `afterListings`, по умолчанию
+ *  четвёртой): контент тот же, что у `inline`, но это отдельная поверхность,
+ *  поэтому и отдельный формат — иначе такую запись нельзя завести из кабинета.
+ *  Нативный формат @zebrooo/promo-renderer с 0.16.0 (та же inline-вёрстка,
+ *  data-format="promoline"); витрина больше не подменяет его на `inline`. */
 export const promoFormatSchema = z.enum(['inline', 'promoline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
@@ -176,6 +177,12 @@ export const promoSchema = z.object({
   /** Multistep only: 'modal' (default) or 'fullscreen'. Applicable to the
    *  multistep format only (refine below). Mirrors the cabinet schema. */
   presentation: z.enum(['modal', 'fullscreen']).optional(),
+  /** Promoline only: позиция строки в ленте — через сколько органических
+   *  карточек (4..50; пусто = умолчание витрины, четвёртая). Нижняя граница —
+   *  правило витрины «ниже видимой области». Renderable-поле: уезжает клиенту
+   *  как есть (НЕ в strip-списке handle.ts). Applicable to the promoline
+   *  format only (refine below). Mirrors the cabinet schema. */
+  afterListings: z.number().int().min(4).max(50).optional(),
   sections: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
   audience: audienceSchema.optional(),
@@ -220,6 +227,12 @@ export const promoSchema = z.object({
   .refine((p) => p.presentation === undefined || p.format === 'multistep', {
     message: 'presentation is only supported by the multistep format',
     path: ['presentation'],
+  })
+  // afterListings is a promoline-only knob (the cabinet's discriminated union
+  // strips it for every other format) — same mirror-refine as presentation.
+  .refine((p) => p.afterListings === undefined || p.format === 'promoline', {
+    message: 'afterListings is only supported by the promoline format',
+    path: ['afterListings'],
   });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)
