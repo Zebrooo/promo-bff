@@ -239,6 +239,12 @@ export interface Promo {
    *  zr-multistep--fullscreen, @zebrooo/promo-renderer 0.11.0). A renderable
    *  field: handed to the client untouched (NOT in the handle.ts strip list). */
   presentation?: 'modal' | 'fullscreen';
+  /** Promoline format only: через сколько органических карточек ленты
+   *  каталога стоит строка (4..50, задаётся в кабинете). A renderable field:
+   *  handed to the client untouched (NOT in the handle.ts strip list); the
+   *  storefront moves its in-feed host to this position. Omitted = storefront
+   *  default (fourth card). */
+  afterListings?: number;
   /** Page sections this promo may show in (e.g. ['avto','realty']). Omitted = any section. */
   sections?: string[];
   /** Page categories this promo may show in. Omitted = any category. */

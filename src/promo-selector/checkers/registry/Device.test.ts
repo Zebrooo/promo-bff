@@ -44,8 +44,9 @@ describe('DeviceChecker', () => {
       }
     });
     it('allows promoline everywhere — the row lives in every feed', () => {
-      // Рендерер о формате не знает (витрина мапит его на inline), поэтому
-      // promoline не десктоп-онли и не должен резаться на touch/app.
+      // Пакет @zebrooo/promo-renderer получает promoline нативно для всех
+      // устройств, поэтому promoline не десктоп-онли и не должен резаться
+      // на touch/app.
       for (const device of ['desktop', 'touch', 'app'] as const) {
         expect(c.check(makeCheckContext({ device, promo: makePromo({ format: 'promoline' }) }))).toBe(true);
       }

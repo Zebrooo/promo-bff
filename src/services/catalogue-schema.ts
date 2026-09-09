@@ -4,10 +4,11 @@ import { isValidNormalizedSearchTerm } from '../util/search-normalization';
 
 export const subscriptionLevelSchema = z.enum(['none', 'plus', 'premium']);
 /** Форматы промо в очередях. `promoline` — строка между объявлениями в лентах
- *  каталога (после четвёртой карточки): контент тот же, что у `inline`, но это
- *  отдельная поверхность, поэтому и отдельный формат — иначе такую запись
- *  нельзя завести из кабинета. Рендерер о `promoline` не знает: витрина
- *  подменяет формат на `inline` перед показом. */
+ *  каталога (по умолчанию после четвёртой карточки, позицию задаёт
+ *  `afterListings`): контент тот же, что у `inline`, но это отдельная
+ *  поверхность, поэтому и отдельный формат — иначе такую запись нельзя завести
+ *  из кабинета. @zebrooo/promo-renderer получает формат нативно для всех
+ *  устройств. */
 export const promoFormatSchema = z.enum(['inline', 'promoline', 'popup', 'fullscreen', 'topline', 'divkit', 'tooltip', 'multistep', 'custom']);
 export const audienceSchema = z.enum(['all', 'authenticated', 'anonymous']);
 export const deviceTargetSchema = z.enum(['desktop', 'touch', 'both']);
@@ -206,6 +207,12 @@ export const promoSchema = z.object({
    *  правленном пуле должен пройти парс и молча скипнуть чекер, а не выронить
    *  промо целиком из parsePoolLeniently. Mirrors the cabinet schema. */
   entrySources: z.array(entrySourceSchema).optional(),
+  /** Promoline only: через сколько органических карточек ленты каталога стоит
+   *  строка (4..50). Renderable — уезжает на витрину, та переставляет хост
+   *  под него; без поля витрина берёт своё умолчание (четвёртая карточка).
+   *  Не меньше 4: витрина вставляет строку только ниже первого экрана, выше
+   *  умолчания она не показалась бы. Mirrors the cabinet schema. */
+  afterListings: z.number().int().min(4).max(50).optional(),
 })
   // Multistep needs its steps — a step-less wizard would render to nothing on
   // the storefront (fail-safe null), so reject it here like the cabinet does.
@@ -220,6 +227,13 @@ export const promoSchema = z.object({
   .refine((p) => p.presentation === undefined || p.format === 'multistep', {
     message: 'presentation is only supported by the multistep format',
     path: ['presentation'],
+  })
+  // afterListings is a promoline-only knob (like presentation for multistep):
+  // a hand-edited pool must not pin a feed position onto a format that has no
+  // row in the feed — the storefront would silently ignore it.
+  .refine((p) => p.afterListings === undefined || p.format === 'promoline', {
+    message: 'afterListings is only supported by the promoline format',
+    path: ['afterListings'],
   });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)

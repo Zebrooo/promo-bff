@@ -348,6 +348,33 @@ describe('multistep presentation (modal | fullscreen)', () => {
   });
 });
 
+describe('promoline afterListings (position of the row in the catalogue feed)', () => {
+  const promoline = (extra: Record<string, unknown> = {}) => makePromo({ format: 'promoline', ...extra });
+
+  it('accepts an integer position within 4..50 on a promoline promo', () => {
+    expect(promoSchema.parse(promoline({ afterListings: 8 })).afterListings).toBe(8);
+    expect(promoSchema.parse(promoline({ afterListings: 4 })).afterListings).toBe(4);
+    expect(promoSchema.parse(promoline({ afterListings: 50 })).afterListings).toBe(50);
+  });
+
+  it('is optional (omitted = storefront default, the fourth card)', () => {
+    expect(promoSchema.parse(promoline()).afterListings).toBeUndefined();
+  });
+
+  it('rejects values outside 4..50 and non-integers', () => {
+    // < 4: витрина вставляет строку только ниже первого экрана.
+    expect(() => promoSchema.parse(promoline({ afterListings: 3 }))).toThrow();
+    expect(() => promoSchema.parse(promoline({ afterListings: 0 }))).toThrow();
+    expect(() => promoSchema.parse(promoline({ afterListings: 51 }))).toThrow();
+    expect(() => promoSchema.parse(promoline({ afterListings: 2.5 }))).toThrow();
+  });
+
+  it('rejects afterListings on non-promoline formats (refine, mirrors the cabinet)', () => {
+    expect(() => promoSchema.parse(makePromo({ format: 'inline', afterListings: 8 }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ format: 'popup', afterListings: 8 }))).toThrow();
+  });
+});
+
 describe('catalogueSchema', () => {
   it('accepts an ordered array of promos and preserves order', () => {
     const parsed = catalogueSchema.parse([makePromo({ id: 'a' }), makePromo({ id: 'b' })]);
