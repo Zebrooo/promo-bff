@@ -93,6 +93,8 @@ export interface AppConfig {
   /** Уведомления админам о новых рекламных кампаниях (ad_campaigns). */
   newCampaignWatch: NewCampaignWatchConfig;
   adminNotify: AdminNotifyConfig;
+  /** Рассылка FCM-пушей пользователям витрины (раздел «Push-рассылки» кабинета). */
+  aaPush: AaPushConfig;
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
   ai: AiConfig;
@@ -105,6 +107,25 @@ export interface NewCampaignWatchConfig {
   /** Публичный URL промо-кабинета (без trailing /) — ссылка «Открыть» в
    *  уведомлении админам. Пусто = уведомление без ссылки. */
   cabinetUrl: string;
+}
+
+export interface AaPushConfig {
+  /** Публичный base URL витрины abkhaz-auto (без trailing /), например
+   *  https://abkhaz-auto.apsoftgroup.ru. Пусто = рассылка выключена
+   *  (черновики кабинета при этом работают, «Отправить» отвечает 503). */
+  baseUrl: string;
+  /** Путь ручки рассылки на витрине. */
+  broadcastPath: string;
+  /** Приватный Ed25519-ключ BFF (base64 DER pkcs8) для исходящих служебных
+   *  тикетов. Витрина проверяет их парным ПУБЛИЧНЫМ ключом. Не путать с
+   *  PROMO_TICKET_PUBLIC_KEY — тем BFF проверяет ВХОДЯЩИЕ тикеты. */
+  ticketPrivateKey: string;
+  /** src исходящего тикета — имя этого сервиса (config.auth.serviceName). */
+  ticketSrc: string;
+  /** dst исходящего тикета — имя сервиса витрины. */
+  ticketDst: string;
+  /** Рассылка на тысячи токенов — не 2.5 с, как у Supabase. */
+  timeoutMs: number;
 }
 
 export interface AdminNotifyConfig {
@@ -210,6 +231,14 @@ export const config: AppConfig = {
         .map((s) => s.trim())
         .filter(Boolean),
     },
+  },
+  aaPush: {
+    baseUrl: (process.env.AA_BASE_URL ?? '').replace(/\/$/, ''),
+    broadcastPath: process.env.AA_PUSH_BROADCAST_PATH ?? '/api/v1/push/broadcast',
+    ticketPrivateKey: process.env.PROMO_TICKET_PRIVATE_KEY ?? '',
+    ticketSrc: process.env.PROMO_SERVICE_NAME ?? 'promo-bff',
+    ticketDst: process.env.AA_SERVICE_NAME ?? 'abkhaz-auto',
+    timeoutMs: Number(process.env.AA_PUSH_TIMEOUT_MS ?? 60_000),
   },
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY ?? '',

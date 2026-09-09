@@ -27,6 +27,10 @@ import { createCampaignReviewService } from './services/campaign-review-service'
 import { createAdminNotifierFromConfig } from './services/admin-notifier';
 import { createNewCampaignWatcher, createS3SeenCampaignsStore, type NewCampaignWatcher } from './services/new-campaign-watcher';
 import { createBalanceService } from './services/balance-service';
+import { createPushCampaignService, type PushCampaignService } from './services/push-campaign-service';
+import { createS3PushCampaignStore } from './services/push-campaign-store';
+import { createPushBroadcastClient } from './services/push-broadcast-client';
+import { pushCampaignInputSchema } from './services/push-campaign-schema';
 import { isModelName, modelRegistry } from './models/registry';
 import type { SelectPromoDeps } from './models/select-promo/handle';
 import { handleSelectPromoList } from './models/select-promo/handle-list';
@@ -76,6 +80,8 @@ export interface BuildServerOptions {
         aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
         /** Пуши админам о новых кампаниях рекламодателей (/new-campaigns/*). */
         newCampaignWatcher: NewCampaignWatcher;
+        /** Пуш-рассылки пользователям витрины из кабинета (/push-campaigns/*). */
+        pushCampaignService: PushCampaignService;
       }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
@@ -199,6 +205,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     newCampaignWatcher.start(config.newCampaignWatch.pollIntervalMs);
     app.addHook('onClose', async () => { newCampaignWatcher.stop(); });
   }
+
+  // Пуш-рассылки кабинета: черновики в S3, отправка — через витрину
+  // (FCM живёт в abkhaz-auto). См. services/push-campaign-service.ts.
+  const pushCampaignService: PushCampaignService = opts.deps?.pushCampaignService ?? createPushCampaignService({
+    store: createS3PushCampaignStore(app.log),
+    broadcast: createPushBroadcastClient(config.aaPush),
+    logger: app.log,
+  });
 
   const auctionDeps: AuctionDeps = {
     campaignService: createCampaignService(),
@@ -1067,6 +1081,94 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     } catch (err) {
       app.log.error({ err }, 'POST /new-campaigns/recent failed');
       return reply.code(502).send({ error: 'campaigns_unavailable' });
+    }
+  });
+
+  // ── Push-рассылки (промо-кабинет) ─────────────────────────────────────
+  // CRUD черновиков + отправка. Та же авторизация service-ticket'ом, что у
+  // /new-campaigns/* и /aa-admin/*. Хранение — S3 push-campaigns.json; сама
+  // рассылка — POST /api/v1/push/broadcast витрины (у неё FCM и токены).
+  // Коды: 404 not_found, 409 already_sent (отправленную не правим и не шлём
+  // повторно), 503 push_not_configured (AA_BASE_URL / PROMO_TICKET_PRIVATE_KEY
+  // пусты), 502 push_broadcast_failed / push_campaigns_unavailable (S3).
+  const pushCampaignIdRe = /^[a-z0-9_-]{1,64}$/i;
+
+  app.get('/push-campaigns', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    try {
+      const campaigns = await pushCampaignService.list();
+      return reply.code(200).send({ campaigns, broadcastConfigured: pushCampaignService.broadcastConfigured });
+    } catch (err) {
+      app.log.error({ err }, 'GET /push-campaigns failed');
+      return reply.code(502).send({ error: 'push_campaigns_unavailable' });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>('/push-campaigns/:id', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const { id } = request.params;
+    if (!pushCampaignIdRe.test(id)) return reply.code(400).send({ error: 'bad_request', reason: 'invalid id' });
+    try {
+      const campaign = await pushCampaignService.get(id);
+      if (!campaign) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(200).send({ campaign, broadcastConfigured: pushCampaignService.broadcastConfigured });
+    } catch (err) {
+      app.log.error({ err }, 'GET /push-campaigns/:id failed');
+      return reply.code(502).send({ error: 'push_campaigns_unavailable' });
+    }
+  });
+
+  // Создать (без id) или обновить (с id) черновик.
+  app.post('/push-campaigns', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const parsed = pushCampaignInputSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_push_campaign', issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    }
+    try {
+      const result = await pushCampaignService.save(parsed.data);
+      if (!result.ok) return reply.code(result.error === 'not_found' ? 404 : 409).send({ error: result.error });
+      return reply.code(result.created ? 201 : 200).send({ campaign: result.campaign });
+    } catch (err) {
+      app.log.error({ err }, 'POST /push-campaigns failed');
+      return reply.code(502).send({ error: 'push_campaigns_unavailable' });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>('/push-campaigns/:id', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const { id } = request.params;
+    if (!pushCampaignIdRe.test(id)) return reply.code(400).send({ error: 'bad_request', reason: 'invalid id' });
+    try {
+      const result = await pushCampaignService.remove(id);
+      if (!result.ok) return reply.code(404).send({ error: result.error });
+      return reply.code(200).send({ ok: true });
+    } catch (err) {
+      app.log.error({ err }, 'DELETE /push-campaigns/:id failed');
+      return reply.code(502).send({ error: 'push_campaigns_unavailable' });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/push-campaigns/:id/send', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    const { id } = request.params;
+    if (!pushCampaignIdRe.test(id)) return reply.code(400).send({ error: 'bad_request', reason: 'invalid id' });
+    try {
+      const result = await pushCampaignService.send(id);
+      if (result.ok) return reply.code(200).send({ campaign: result.campaign });
+      const status = result.error === 'not_found' ? 404
+        : result.error === 'already_sent' ? 409
+        : result.error === 'push_not_configured' ? 503
+        : 502;
+      return reply.code(status).send({ error: result.error, ...(result.reason ? { reason: result.reason } : {}) });
+    } catch (err) {
+      app.log.error({ err }, 'POST /push-campaigns/:id/send failed');
+      return reply.code(502).send({ error: 'push_campaigns_unavailable' });
     }
   });
 

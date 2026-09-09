@@ -208,6 +208,45 @@ bootstrap: всё существующее помечается виденным
 | `ADMIN_TELEGRAM_BOT_TOKEN` / `ADMIN_TELEGRAM_CHAT_IDS` | бот и чаты (через запятую) для Telegram-уведомлений. |
 | `PROMO_CABINET_URL` | публичный URL кабинета — ссылка «Открыть» в уведомлении. |
 
+## Push-рассылки пользователям витрины (промо-кабинет)
+
+Раздел «Push-рассылки» кабинета: админ пишет заголовок/текст/ссылку/иконку,
+выбирает те же фильтры таргетинга, что у промо, и жмёт «Отправить пуш».
+Черновики BFF хранит в S3 (`push-campaigns.json`, рядом с `promos.json`;
+`src/services/push-campaign-store.ts`), рассылку делает витрина — у неё
+FCM-инфраструктура и таблица `device_tokens`. BFF зовёт
+`POST {AA_BASE_URL}/api/v1/push/broadcast` со служебным тикетом
+(`src/services/push-broadcast-client.ts`). Таргетинг на первом этапе только
+сохраняется: рассылка уходит всем пользователям с FCM-токенами (`userIds` не
+передаём); отбор по фильтрам — следующий этап.
+
+Ручки (service-ticket, как `/leads` и `/aa-admin/*`):
+
+| ручка | что делает | коды |
+| --- | --- | --- |
+| `GET /push-campaigns` | список `{ campaigns, broadcastConfigured }` (новые сверху) | 502 `push_campaigns_unavailable` |
+| `GET /push-campaigns/:id` | одна кампания | 404 `not_found` |
+| `POST /push-campaigns` | создать (без `id`, 201) или обновить (с `id`, 200) черновик | 400 `invalid_push_campaign` (+`issues`), 404, 409 `already_sent` |
+| `DELETE /push-campaigns/:id` | удалить | 404 |
+| `POST /push-campaigns/:id/send` | разослать; кампания становится `sent` с `sentAt`/`sendResult` | 409 `already_sent`, 503 `push_not_configured`, 502 `push_broadcast_failed` (+`reason`; черновик остаётся с `lastSendError`) |
+
+Отправка пишет `sent` в S3 **до** вызова витрины (как поллер новых
+кампаний): двойной клик и повтор после падения BFF не разошлют пуш дважды;
+при ошибке витрины статус откатывается в черновик. Мутации сериализованы
+одной цепочкой промисов внутри процесса.
+
+| env | назначение |
+| --- | --- |
+| `AA_BASE_URL` | публичный base витрины (без trailing `/`), например `https://abkhaz-auto.apsoftgroup.ru`. Пусто = «Отправить» отвечает 503, черновики работают. |
+| `AA_PUSH_BROADCAST_PATH` | путь ручки рассылки, по умолчанию `/api/v1/push/broadcast`. |
+| `PROMO_TICKET_PRIVATE_KEY` | **приватный** Ed25519-ключ BFF (base64 DER pkcs8) для исходящих тикетов `src=promo-bff` → `dst=abkhaz-auto`. Парный публичный ключ витрина держит у себя для проверки. Не путать с `PROMO_TICKET_PUBLIC_KEY`, которым BFF проверяет входящие тикеты. |
+| `AA_SERVICE_NAME` | `dst` исходящего тикета, по умолчанию `abkhaz-auto`. |
+| `AA_PUSH_TIMEOUT_MS` | таймаут вызова витрины (рассылка на тысячи токенов), по умолчанию 60000. |
+
+Кабинет ходит в эти ручки с `src=promo-cabinet` — он должен быть в
+`PROMO_ALLOWED_SRC`. Контракт ручки витрины описан в
+`promo-cabinet/docs/2026-09-09-push-campaigns.md`.
+
 ## Adding a model
 
 Write `validate` + `handle`, then add one entry to

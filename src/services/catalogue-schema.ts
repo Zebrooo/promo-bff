@@ -83,6 +83,42 @@ export const scheduleSchema = z.object({
   hourEnd: z.number().int().min(1).max(24),
 }).refine((s) => s.hourStart < s.hourEnd);
 
+/** Оси targeting.* промо. Вынесены отдельно: их же переиспользует
+ *  push-campaign-schema.ts (пуш-рассылки кабинета хранят тот же таргетинг). */
+export const promoTargetingSchema = z.object({
+  minAge: z.number().int().nonnegative().optional(),
+  maxAge: z.number().int().nonnegative().optional(),
+  regions: z.array(z.string()).optional(),
+  subscriptionLevels: z.array(subscriptionLevelSchema).optional(),
+  os: z.array(promoOsSchema).optional(),
+  environments: z.array(promoEnvironmentSchema).optional(),
+  deviceBrands: z.array(deviceBrandSchema).optional(),
+  /** IP-гео (GeoChecker): сегменты «где сейчас» + города-слаги. Mirrors the cabinet schema. */
+  geoSegments: z.array(geoSegmentSchema).optional(),
+  geoCities: z.array(z.string().min(1).max(64)).optional(),
+  /** Профиль визита (VisitorChecker): newcomer/regular + пороги. Mirrors the cabinet schema. */
+  visitorClass: visitorClassSchema.optional(),
+  newcomerMaxAgeDays: z.number().int().min(1).max(365).optional(),
+  regularMinVisitDays: z.number().int().min(1).max(30).optional(),
+  search: searchTargetingSchema.optional(),
+  purchases: purchasesTargetingSchema.optional(),
+  balance: balanceTargetingSchema.optional(),
+  behavior: behaviorTargetingSchema.optional(),
+  listings: listingsTargetingSchema.optional(),
+});
+
+/** Жизненный цикл объявлений зрителя — см. комментарий у promoSchema.lifecycle.
+ *  Вынесен для push-campaign-schema.ts. */
+export const lifecycleTargetingSchema = z.object({
+  activeInCategories: z.array(z.string().min(1)).min(1).optional(),
+  soldWithinDays: z.number().int().min(1).max(90).optional(),
+  hasStalledActive: z.literal(true).optional(),
+  firstListingWithinDays: z.number().int().min(1).max(30).optional(),
+})
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: 'пустой lifecycle не имеет смысла — задайте хотя бы одно условие',
+  });
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
@@ -90,27 +126,7 @@ export const promoSchema = z.object({
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
   schedule: scheduleSchema.optional().catch(undefined),
-  targeting: z.object({
-    minAge: z.number().int().nonnegative().optional(),
-    maxAge: z.number().int().nonnegative().optional(),
-    regions: z.array(z.string()).optional(),
-    subscriptionLevels: z.array(subscriptionLevelSchema).optional(),
-    os: z.array(promoOsSchema).optional(),
-    environments: z.array(promoEnvironmentSchema).optional(),
-    deviceBrands: z.array(deviceBrandSchema).optional(),
-    /** IP-гео (GeoChecker): сегменты «где сейчас» + города-слаги. Mirrors the cabinet schema. */
-    geoSegments: z.array(geoSegmentSchema).optional(),
-    geoCities: z.array(z.string().min(1).max(64)).optional(),
-    /** Профиль визита (VisitorChecker): newcomer/regular + пороги. Mirrors the cabinet schema. */
-    visitorClass: visitorClassSchema.optional(),
-    newcomerMaxAgeDays: z.number().int().min(1).max(365).optional(),
-    regularMinVisitDays: z.number().int().min(1).max(30).optional(),
-    search: searchTargetingSchema.optional(),
-    purchases: purchasesTargetingSchema.optional(),
-    balance: balanceTargetingSchema.optional(),
-    behavior: behaviorTargetingSchema.optional(),
-    listings: listingsTargetingSchema.optional(),
-  }),
+  targeting: promoTargetingSchema,
   // Optional per-user cap. Legacy data used 0 = unlimited; coerce that to
   // undefined (the new "unlimited") so old catalogues still parse.
   maxImpressionsPerUser: z.preprocess(
@@ -193,16 +209,7 @@ export const promoSchema = z.object({
    *  Refine по значениям (не Object.keys): кабинетная сторона может подать
    *  объект с ключами-undefined из Formik-стейта — «пустой» он в обоих
    *  смыслах. */
-  lifecycle: z.object({
-    activeInCategories: z.array(z.string().min(1)).min(1).optional(),
-    soldWithinDays: z.number().int().min(1).max(90).optional(),
-    hasStalledActive: z.literal(true).optional(),
-    firstListingWithinDays: z.number().int().min(1).max(30).optional(),
-  })
-    .refine((v) => Object.values(v).some((x) => x !== undefined), {
-      message: 'пустой lifecycle не имеет смысла — задайте хотя бы одно условие',
-    })
-    .optional(),
+  lifecycle: lifecycleTargetingSchema.optional(),
   /**
    * Where the promo may show. Omitted/`'both'` = any device. The BFF
    * select-promo filters candidates by the request's `device` (см.
