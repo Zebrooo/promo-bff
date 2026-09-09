@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleSelectPromo, loadWalletDataForSelection, type SelectPromoDeps } from './handle';
+import { handleSelectPromo, loadAdvertiserForSelection, loadWalletDataForSelection, type SelectPromoDeps } from './handle';
 import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
@@ -9,6 +9,7 @@ import type { ListingService } from '../../services/listing-service';
 import { promoSchema } from '../../services/catalogue-schema';
 import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
+import { EMPTY_ADVERTISER_SIGNAL } from '../../services/advertiser-signal-service';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
   getQueue: async () => ({ promos: [makePromo()], persist: false }),
@@ -54,6 +55,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
   balanceService: { getBalances: async () => new Map() },
   behaviorSignalService: { getSignal: async () => ({ interests: [], phoneViews7d: 0 }) },
+  advertiserSignalService: { getSignal: async (_u, o) => ({ ...EMPTY_ADVERTISER_SIGNAL, wizardWindowDays: o.wizardLookbackDays }) },
   ...over,
 });
 
@@ -905,6 +907,99 @@ describe('loadWalletDataForSelection', () => {
     expect(recorded[0]).toMatchObject({
       userId: 'env-trace', queue: 'home', env: { os: 'android', runtime: 'app' },
     });
+  });
+});
+
+describe('loadAdvertiserForSelection / handleSelectPromo advertiser axis', () => {
+  beforeEach(() => {
+    __clearUserDataCache();
+  });
+  const authUser = { isAuthorized: true, identityKind: 'account' as const };
+  const advertiserPromo = (rule: NonNullable<ReturnType<typeof makePromo>['targeting']['advertiser']>, id = 'adv-1') =>
+    makePromo({ id, targeting: { advertiser: rule } });
+  const signalOf = (over: Partial<typeof EMPTY_ADVERTISER_SIGNAL> = {}) =>
+    vi.fn(async (_u: string, o: { wizardLookbackDays: number }) => ({ ...EMPTY_ADVERTISER_SIGNAL, wizardWindowDays: o.wizardLookbackDays, ...over }));
+
+  it('does not read the signal without an advertiser rule, for guests/anonymous ids, or when skipped', async () => {
+    const getSignal = signalOf();
+    const d = deps({ advertiserSignalService: { getSignal } });
+    await expect(loadAdvertiserForSelection({ userId: 'u1', user: authUser }, [makePromo()], [], d, 'select-promo')).resolves.toBeUndefined();
+    await expect(loadAdvertiserForSelection({ userId: 'u1' }, [advertiserPromo({ everLaunched: true })], [], d, 'select-promo')).resolves.toBeUndefined();
+    await expect(loadAdvertiserForSelection(
+      { userId: 'anon-1', user: { isAuthorized: false, identityKind: 'anonymous' } }, [advertiserPromo({ everLaunched: true })], [], d, 'select-promo',
+    )).resolves.toBeUndefined();
+    await expect(loadAdvertiserForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ everLaunched: true })], ['advertiser'], d, 'select-promo')).resolves.toBeUndefined();
+    expect(getSignal).not.toHaveBeenCalled();
+  });
+
+  it('reads once with the queue-wide max wizard window (0 when no promo asks about the wizard)', async () => {
+    const getSignal = signalOf();
+    const d = deps({ advertiserSignalService: { getSignal }, now: () => new Date('2026-09-09T12:00:00.000Z') });
+    await loadAdvertiserForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ everLaunched: true })], [], d, 'select-promo');
+    expect(getSignal).toHaveBeenLastCalledWith('u1', { wizardLookbackDays: 0, now: new Date('2026-09-09T12:00:00.000Z') });
+    await loadAdvertiserForSelection(
+      { userId: 'u1', user: authUser },
+      [advertiserPromo({ abandonedWizard: true }, 'a'), advertiserPromo({ abandonedWizard: false, wizardLookbackDays: 45 }, 'b'), advertiserPromo({ abandonedWizard: true, wizardLookbackDays: 7 }, 'c')],
+      [], d, 'select-promo',
+    );
+    expect(getSignal).toHaveBeenLastCalledWith('u1', expect.objectContaining({ wizardLookbackDays: 45 }));
+    expect(getSignal).toHaveBeenCalledTimes(2);
+  });
+
+  it('degrades to undefined (fail closed for targeted promos only) when the service throws', async () => {
+    const error = vi.fn();
+    const d = deps({
+      advertiserSignalService: { getSignal: async () => { throw new Error('supabase down'); } },
+      logger: { info: () => {}, error },
+    });
+    await expect(loadAdvertiserForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ everLaunched: false })], [], d, 'select-promo')).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith({ error: 'supabase down' }, 'select-promo: advertiser signal unavailable');
+
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [advertiserPromo({ everLaunched: false }), makePromo({ id: 'generic-1' })], persist: false }),
+    });
+    const result = await handleSelectPromo({ userId: 'u1', user: authUser }, deps({ configService, advertiserSignalService: d.advertiserSignalService }));
+    expect(result).toMatchObject({ status: 'ok', data: { id: 'generic-1' } });
+  });
+
+  it('end-to-end: сегмент №1 «запускал, сейчас неактивна» проходит только у подходящего рекламодателя', async () => {
+    const promo = advertiserPromo({ everLaunched: true, hasActiveCampaign: false });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo, makePromo({ id: 'generic-1' })], persist: false }) });
+    const pick = async (over: Partial<typeof EMPTY_ADVERTISER_SIGNAL>) => {
+      const result = await handleSelectPromo({ userId: 'u1', user: authUser }, deps({ configService, advertiserSignalService: { getSignal: signalOf(over) } }));
+      return (result as { data: { id: string } }).data.id;
+    };
+    expect(await pick({ statuses: ['paused'], lastLaunchedAt: '2026-08-01T00:00:00.000Z' })).toBe('adv-1');
+    expect(await pick({ statuses: ['active'], hasActive: true, lastLaunchedAt: '2026-08-01T00:00:00.000Z' })).toBe('generic-1');
+    expect(await pick({})).toBe('generic-1');
+    // Гость: сигнал не читается, промо с осью пропускается.
+    const guest = await handleSelectPromo({ userId: 'anon-1', user: { isAuthorized: false, identityKind: 'anonymous' } }, deps({ configService }));
+    expect((guest as { data: { id: string } }).data.id).toBe('generic-1');
+  });
+
+  it('walletAtMostKopecks pulls the wallet balance through loadWalletDataForSelection (one read shared with BalanceChecker)', async () => {
+    const getBalances = vi.fn(async () => new Map([['u1', 0]]));
+    const walletDeps = deps({ balanceService: { getBalances } });
+    const wallet = await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ walletAtMostKopecks: 0 })], [], walletDeps, 'select-promo');
+    expect(getBalances).toHaveBeenCalledWith(['u1']);
+    expect(wallet.walletBalanceKopecks).toBe(0);
+    // Без кошелька в правиле — баланс не читается.
+    getBalances.mockClear();
+    await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ everLaunched: true })], [], walletDeps, 'select-promo');
+    expect(getBalances).not.toHaveBeenCalled();
+    // skipCheckers: ['advertiser'] — тоже не читается.
+    await loadWalletDataForSelection({ userId: 'u1', user: authUser }, [advertiserPromo({ walletAtMostKopecks: 0 })], ['advertiser'], walletDeps, 'select-promo');
+    expect(getBalances).not.toHaveBeenCalled();
+
+    // Конец-в-конец: пустой кошелёк → промо «пополните кошелёк» показывается, с деньгами — нет.
+    const promo = advertiserPromo({ walletAtMostKopecks: 0 });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo, makePromo({ id: 'generic-1' })], persist: false }) });
+    const empty = await handleSelectPromo({ userId: 'u1', user: authUser }, deps({ configService, balanceService: { getBalances: async () => new Map() } }));
+    expect((empty as { data: { id: string } }).data.id).toBe('adv-1');
+    const rich = await handleSelectPromo({ userId: 'u1', user: authUser }, deps({ configService, balanceService: { getBalances: async () => new Map([['u1', 500]]) } }));
+    expect((rich as { data: { id: string } }).data.id).toBe('generic-1');
+    const outage = await handleSelectPromo({ userId: 'u1', user: authUser }, deps({ configService, balanceService: { getBalances: async () => { throw new Error('down'); } } }));
+    expect((outage as { data: { id: string } }).data.id).toBe('generic-1');
   });
 });
 

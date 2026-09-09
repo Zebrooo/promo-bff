@@ -71,6 +71,24 @@ export const listingsTargetingSchema = z.object({
   inactiveDays: z.number().int().nonnegative().optional(),
 });
 
+/** Ось «Рекламодатель» (AdvertiserChecker). Зеркалит advertiserTargetingSchema
+ *  кабинета (promo-cabinet/src/lib/schema.ts) без его refine'ов на противоречия:
+ *  противоречивое правило здесь просто никому не совпадёт. Статусы — свободные
+ *  слаги ad_campaigns.status, чтобы не релизить BFF под каждый новый статус. */
+export const advertiserTargetingSchema = z.object({
+  campaignStatuses: z.array(z.string().trim().min(1).max(32).regex(/^[a-z][a-z0-9_-]*$/)).max(10).optional(),
+  hasActiveCampaign: z.boolean().optional(),
+  everLaunched: z.boolean().optional(),
+  launchedWithinDays: z.number().int().min(1).max(365).optional(),
+  abandonedWizard: z.boolean().optional(),
+  wizardLookbackDays: z.number().int().min(1).max(90).optional(),
+  paidCampaigns: z.boolean().optional(),
+  minSpentKopecks: z.number().int().nonnegative().optional(),
+  budgetExhausted: z.boolean().optional(),
+  endsWithinDays: z.number().int().min(1).max(90).optional(),
+  walletAtMostKopecks: z.number().int().nonnegative().optional(),
+});
+
 /** Dayparting-блок (спека targeting-schedule §3). Зеркалит scheduleSchema
  *  кабинета, но с .catch(undefined) на месте использования — кривое
  *  ОПЦИОНАЛЬНОЕ поле не должно ронять всё промо в parsePoolLeniently
@@ -105,6 +123,7 @@ export const promoTargetingSchema = z.object({
   balance: balanceTargetingSchema.optional(),
   behavior: behaviorTargetingSchema.optional(),
   listings: listingsTargetingSchema.optional(),
+  advertiser: advertiserTargetingSchema.optional(),
 });
 
 /** Жизненный цикл объявлений зрителя — см. комментарий у promoSchema.lifecycle.

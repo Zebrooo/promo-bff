@@ -243,7 +243,7 @@ describe('selectPromo env targeting', () => {
     expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
       'date', 'targeting', 'geo', 'audience', 'visitor', 'source', 'context', 'search', 'purchases', 'balance',
       'interest', 'hot-buyer', 'engagement',
-      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'limit', 'cooldown', 'reaction', 'chain',
+      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'advertiser', 'limit', 'cooldown', 'reaction', 'chain',
     ]);
   });
 

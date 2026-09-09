@@ -8,6 +8,7 @@ import type { ImpressionStore } from '../../services/impression-store';
 import type { ListingService } from '../../services/listing-service';
 import { makePromo, makeListingStats } from '../../test-utils';
 import { __clearUserDataCache } from '../../promo-selector/checkers/suppliers';
+import { EMPTY_ADVERTISER_SIGNAL } from '../../services/advertiser-signal-service';
 
 const fakeConfigService = (over: Partial<ConfigService> = {}): ConfigService => ({
   getQueue: async () => ({ promos: [makePromo()], persist: false }),
@@ -25,6 +26,7 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   purchaseLedgerService: { getPurchases: async () => [], getMovement: async () => 0 },
   balanceService: { getBalances: async () => new Map() },
   behaviorSignalService: { getSignal: async () => ({ interests: [], phoneViews7d: 0 }) },
+  advertiserSignalService: { getSignal: async (_u, o) => ({ ...EMPTY_ADVERTISER_SIGNAL, wizardWindowDays: o.wizardLookbackDays }) },
   ...over,
 });
 

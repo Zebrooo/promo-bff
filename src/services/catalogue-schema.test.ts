@@ -187,6 +187,36 @@ describe('promoSchema', () => {
   });
 });
 
+describe('promoSchema — advertiser targeting (ось «Рекламодатель», зеркало кабинета)', () => {
+  const full = {
+    campaignStatuses: ['active', 'pending'], hasActiveCampaign: false, everLaunched: true, launchedWithinDays: 90,
+    abandonedWizard: true, wizardLookbackDays: 30, paidCampaigns: true, minSpentKopecks: 100000, budgetExhausted: false,
+    endsWithinDays: 7, walletAtMostKopecks: 0,
+  };
+
+  it('keeps every advertiser field through parse (regression class: silently-dropped-field)', () => {
+    const result = promoSchema.safeParse(makePromo({ targeting: { advertiser: full } }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.targeting.advertiser).toEqual(full);
+  });
+
+  it('accepts an empty block and a promo without the block (обратная совместимость)', () => {
+    expect(promoSchema.safeParse(makePromo({ targeting: { advertiser: {} } })).success).toBe(true);
+    expect(promoSchema.safeParse(makePromo()).success).toBe(true);
+  });
+
+  it('rejects out-of-range values and non-slug statuses', () => {
+    const bad = [
+      { launchedWithinDays: 0 }, { launchedWithinDays: 366 }, { wizardLookbackDays: 91 }, { endsWithinDays: 0 },
+      { minSpentKopecks: -1 }, { walletAtMostKopecks: 1.5 }, { campaignStatuses: ['Active'] }, { campaignStatuses: [''] },
+      { campaignStatuses: Array.from({ length: 11 }, (_, i) => `s${i}`) }, { hasActiveCampaign: 'yes' },
+    ];
+    for (const advertiser of bad) {
+      expect(promoSchema.safeParse(makePromo({ targeting: { advertiser: advertiser as never } })).success, JSON.stringify(advertiser)).toBe(false);
+    }
+  });
+});
+
 describe('purchases/balance targeting (regression: must not be stripped by z.object)', () => {
   // Bug: targeting was a plain z.object({...}) without `purchases`/`balance`
   // keys, so zod's default strip behaviour silently dropped these fields

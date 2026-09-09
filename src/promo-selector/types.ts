@@ -126,6 +126,34 @@ export interface PromoTargeting {
     /** Minimum days since the user's most recent listing (any status). */
     inactiveDays?: number;
   };
+  /** Ось «Рекламодатель» (AdvertiserChecker): условия по рекламным кампаниям
+   *  зрителя (ad_campaigns витрины) и мастеру подачи РК. Между условиями — AND,
+   *  внутри campaignStatuses — OR. Только для залогиненных (fail closed).
+   *  Omitted/empty = no advertiser targeting. Mirrors the cabinet schema. */
+  advertiser?: {
+    /** Есть РК хотя бы в одном из статусов СЕЙЧАС (слаги ad_campaigns.status). */
+    campaignStatuses?: string[];
+    /** true = есть РК со status='active'; false = ни одной активной. */
+    hasActiveCampaign?: boolean;
+    /** true = хоть одна РК запускалась (см. LAUNCHED_STATUSES / списания); false = никогда. */
+    everLaunched?: boolean;
+    /** Только при everLaunched=true: последний запуск не старше N дней (1..365). */
+    launchedWithinDays?: number;
+    /** true = form_start мастера (form_id='ad_campaign') без form_submit_success за окно; false = нет. */
+    abandonedWizard?: boolean;
+    /** Окно для abandonedWizard, дней (1..90). Дефолт чекера 30. */
+    wizardLookbackDays?: number;
+    /** true = сумма spent_kopecks по РК > 0; false = не платил. */
+    paidCampaigns?: boolean;
+    /** Только при paidCampaigns=true: суммарно списано ≥ N копеек. */
+    minSpentKopecks?: number;
+    /** true = есть РК с исчерпанным общим/дневным бюджетом; false = нет. */
+    budgetExhausted?: boolean;
+    /** Есть активная РК с ends_at в ближайшие N дней (1..90). */
+    endsWithinDays?: number;
+    /** Баланс рекламного кошелька (ledger_accounts, kind=liability) ≤ N копеек; 0 = пустой. */
+    walletAtMostKopecks?: number;
+  };
 }
 
 /**

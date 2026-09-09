@@ -4,6 +4,7 @@ import {
   Checker,
   loadSuppliers,
   WEB_CHECKERS,
+  type AdvertiserSignal,
   type BehaviorSignal,
   type CheckContext,
   type Logger,
@@ -82,6 +83,9 @@ export interface SelectPromoContext {
   walletBalanceUnavailable?: boolean;
   /** Net wallet movement per requested window, preloaded once by the model handler. */
   walletMovementByWindow?: Map<number | undefined, number>;
+  /** Сигнал рекламодателя (РК + мастер подачи), преднагруженный model handler'ом.
+   *  undefined = не загружали/не смогли → advertiser-промо fail closed. */
+  advertiser?: AdvertiserSignal;
 }
 
 export interface SelectPromoOptions {
@@ -162,6 +166,7 @@ async function evaluateCandidate(
     walletBalanceKopecks: ctx.walletBalanceKopecks,
     walletBalanceUnavailable: ctx.walletBalanceUnavailable,
     walletMovementByWindow: ctx.walletMovementByWindow,
+    advertiser: ctx.advertiser,
   };
   const checks: CheckerTraceEntry[] = [];
   let passed = true;

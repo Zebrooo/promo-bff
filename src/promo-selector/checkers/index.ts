@@ -18,13 +18,14 @@ import { FormatChecker } from './registry/Format';
 import { SellerChecker } from './registry/Seller';
 import { LifecycleChecker } from './registry/Lifecycle';
 import { ListingsChecker } from './registry/Listings';
+import { AdvertiserChecker } from './registry/Advertiser';
 import { LimitChecker, CooldownChecker } from './registry/Frequency';
 import { ReactionChecker } from './registry/Reaction';
 import { ChainChecker } from './registry/Chain';
 
 export { Checker } from './Checker';
 export type { CheckContext, SupplierId, SuppliersData, UserData, Logger } from './Checker';
-export type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal } from './Checker';
+export type { SearchHistoryEntry, PurchaseEntry, BehaviorSignal, AdvertiserSignal } from './Checker';
 export { loadSuppliers, type SupplierDeps } from './suppliers';
 
 /** Web checker collection, in evaluation order. */
@@ -48,6 +49,7 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new SellerChecker(),
   new LifecycleChecker(),
   new ListingsChecker(),
+  new AdvertiserChecker(),
   new LimitChecker(),
   new CooldownChecker(),
   new ReactionChecker(),

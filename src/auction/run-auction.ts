@@ -64,7 +64,9 @@ const MOSCOW_DATE_FORMAT = new Intl.DateTimeFormat('en', {
   day: '2-digit',
 });
 
-function moscowDateKey(value: Date): string {
+/** YYYY-MM-DD в Europe/Moscow — ключ дневного бюджета (spent_today_date). Экспорт
+ *  для advertiser-signal-service: та же семантика «сегодня», что у dailyBudgetCheck. */
+export function moscowDateKey(value: Date): string {
   const parts = MOSCOW_DATE_FORMAT.formatToParts(value);
   const year = parts.find((part) => part.type === 'year')!.value;
   const month = parts.find((part) => part.type === 'month')!.value;
