@@ -113,7 +113,16 @@ export function createS3SeenCampaignsStore(): SeenCampaignsStore {
       try {
         const res = await getS3Client().send(new GetObjectCommand({ Bucket: config.s3.bucket, Key: seenCampaignsKey() }));
         if (!res.Body) return emptySeenState();
-        return normalize(JSON.parse(await res.Body.transformToString()));
+        const text = await res.Body.transformToString();
+        try {
+          return normalize(JSON.parse(text));
+        } catch {
+          // Битый JSON (обрыв записи, ручная правка) — как отсутствующий файл:
+          // следующий опрос сделает bootstrap заново. Иначе поллер падал бы
+          // каждую минуту, пока кто-то не починит объект руками.
+          console.warn('[new-campaign-watcher] seen-campaigns.json is not valid JSON — treating as missing');
+          return emptySeenState();
+        }
       } catch (err) {
         if (isNoSuchKey(err)) return emptySeenState();
         throw err;
@@ -175,43 +184,65 @@ export function createNewCampaignWatcher(deps: NewCampaignWatcherDeps): NewCampa
     return run;
   }
 
+  let warnedNoChannels = false;
+
   async function poll(): Promise<{ notified: number[] }> {
     if (!review.configured) return { notified: [] };
     return withLock(async () => {
-      const rows = await review.listCampaigns({ statuses: [...WATCHED_STATUSES], limit: POLL_LIMIT });
+      // Дешёвый опрос: только id+status; полные строки — лишь для новых.
+      const ids = await review.listCampaignIds({ statuses: [...WATCHED_STATUSES], limit: POLL_LIMIT });
       const state = await store.read();
       const at = iso();
 
       if (state.bootstrappedAt === null) {
-        for (const r of rows) state.campaigns[String(r.id)] ??= { seenAt: at, bootstrap: true };
+        for (const r of ids) state.campaigns[String(r.id)] ??= { seenAt: at, bootstrap: true };
         state.bootstrappedAt = at;
         await store.write(state);
-        logger?.info({ campaigns: rows.length }, 'new-campaign-watcher: bootstrapped, existing campaigns marked seen');
+        logger?.info({ campaigns: ids.length }, 'new-campaign-watcher: bootstrapped, existing campaigns marked seen');
         return { notified: [] };
       }
 
-      const fresh = rows.filter((r) => state.campaigns[String(r.id)] === undefined);
-      if (fresh.length === 0) return { notified: [] };
+      const freshIds = ids.filter((r) => state.campaigns[String(r.id)] === undefined).map((r) => r.id);
+      if (freshIds.length === 0) return { notified: [] };
 
+      // Нет ни одного канала — не «съедаем» кампании: как только оператор
+      // задаст VAPID/Telegram, о них уйдут пуши. Предупреждаем один раз.
+      if (notifier.channels.length === 0) {
+        if (!warnedNoChannels) {
+          warnedNoChannels = true;
+          logger?.warn({ pending: freshIds.length }, 'new-campaign-watcher: new campaigns but no notification channel configured (WEB_PUSH_* / ADMIN_TELEGRAM_*)');
+        }
+        return { notified: [] };
+      }
+
+      const fresh = await review.listCampaigns({ ids: freshIds, limit: freshIds.length });
       // Сначала фиксируем «видели», потом шлём: упавшая отправка не должна
       // превращаться в пуш каждую минуту.
-      for (const r of fresh) state.campaigns[String(r.id)] = { seenAt: at };
+      for (const id of freshIds) state.campaigns[String(id)] = { seenAt: at };
       await store.write(state);
-      logger?.info({ ids: fresh.map((r) => r.id) }, 'new-campaign-watcher: new campaigns');
+      logger?.info({ ids: freshIds }, 'new-campaign-watcher: new campaigns');
 
       const notified: number[] = [];
+      let dirty = false;
       for (const r of fresh) {
         try {
           const outcome = await notifier.notify(buildNewCampaignNotification(r, deps.cabinetUrl));
           if (outcome.delivered > 0) {
             state.campaigns[String(r.id)] = { seenAt: at, notifiedAt: iso() };
             notified.push(r.id);
+            dirty = true;
+          } else if (outcome.attempted === 0) {
+            // Никому даже не пытались отправить (нет подписчиков / не
+            // прочитался список подписок) — вернём в «не видели», чтобы
+            // повторить на следующем тике, когда подписчики появятся.
+            delete state.campaigns[String(r.id)];
+            dirty = true;
           }
         } catch (err) {
           logger?.error({ err, campaignId: r.id }, 'new-campaign-watcher: notify failed');
         }
       }
-      if (notified.length > 0) await store.write(state);
+      if (dirty) await store.write(state);
       return { notified };
     });
   }

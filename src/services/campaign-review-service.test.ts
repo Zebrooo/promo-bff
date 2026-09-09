@@ -40,6 +40,19 @@ describe('createCampaignReviewService', () => {
     const svc = createCampaignReviewService({ url: '', serviceRoleKey: '', timeoutMs: 1 });
     expect(svc.configured).toBe(false);
     expect(await svc.listCampaigns({})).toEqual([]);
+    expect(await svc.listCampaignIds({})).toEqual([]);
+  });
+
+  it('listCampaignIds asks only for id,status and coerces ids', async () => {
+    const fn = mockFetch(200, [{ id: '9', status: 'active' }, { id: 8, status: null }]);
+    expect(await createCampaignReviewService(cfg).listCampaignIds({ statuses: ['active'], limit: 5000 })).toEqual([
+      { id: 9, status: 'active' }, { id: 8, status: '' },
+    ]);
+    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('select=id,status');
+    expect(url).toContain('status=in.(active)');
+    expect(url).toContain('limit=5000');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('lists with status + id filters via select=*', async () => {

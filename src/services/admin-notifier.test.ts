@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createECDH, generateKeyPairSync, randomBytes } from 'node:crypto';
-import { createAdminNotifier, createAdminNotifierFromConfig, parsePushSubscriptions } from './admin-notifier';
+import { createAdminNotifier, createAdminNotifierFromConfig, parsePushSubscriptions, removePushSubscriptionsFromS3 } from './admin-notifier';
+import { mockClient } from 'aws-sdk-client-mock';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { resetS3ClientForTests } from './s3-client';
 
 function vapid() {
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -52,8 +55,9 @@ describe('createAdminNotifier', () => {
       return { ok: true, status: 201 } as Response;
     });
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const removeSubscriptions = vi.fn(async () => {});
     const n = createAdminNotifier({
-      webPush: { keys: vapid(), loadSubscriptions: async () => [subscription('https://push.example/ok'), subscription('https://push.example/dead')] },
+      webPush: { keys: vapid(), loadSubscriptions: async () => [subscription('https://push.example/ok'), subscription('https://push.example/dead')], removeSubscriptions },
       telegram: { botToken: 'TOKEN', chatIds: ['1', 'bad'] },
       fetchImpl: fetchImpl as unknown as typeof fetch,
       logger,
@@ -71,6 +75,8 @@ describe('createAdminNotifier', () => {
     expect(payload.text).toContain('&lt;b&gt;x&lt;/b&gt; &amp; y');
     expect(payload.text).toContain('href="https://cab.example/cabinet/campaigns"');
     expect(logger.warn).toHaveBeenCalledTimes(2);
+    // 410 — подписка мёртвая, её вычищают из файла кабинета.
+    expect(removeSubscriptions).toHaveBeenCalledWith(['https://push.example/dead']);
     // Токен бота в предупреждения не попадает.
     for (const call of logger.warn.mock.calls) expect(JSON.stringify(call)).not.toContain('TOKEN');
   });
@@ -84,6 +90,23 @@ describe('createAdminNotifier', () => {
     });
     expect(await n.notify({ title: 't', body: 'b' })).toEqual({ attempted: 0, delivered: 0, failed: 0 });
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('removePushSubscriptionsFromS3 rewrites the cabinet file without the dead endpoints', async () => {
+    resetS3ClientForTests();
+    const s3 = mockClient(S3Client);
+    const file = { version: 1, subscriptions: [{ ...subscription('https://push.example/a'), createdAt: 'x' }, { ...subscription('https://push.example/b'), createdAt: 'y' }] };
+    s3.on(GetObjectCommand).resolves({ Body: { transformToString: async () => JSON.stringify(file) } } as never);
+    s3.on(PutObjectCommand).resolves({});
+    await removePushSubscriptionsFromS3(['https://push.example/a']);
+    const put = s3.commandCalls(PutObjectCommand)[0]!.args[0].input;
+    expect(JSON.parse(put.Body as string)).toEqual({ version: 1, subscriptions: [file.subscriptions[1]] });
+    s3.reset();
+    s3.on(GetObjectCommand).resolves({ Body: { transformToString: async () => JSON.stringify(file) } } as never);
+    await removePushSubscriptionsFromS3(['https://push.example/none']);
+    expect(s3.commandCalls(PutObjectCommand)).toHaveLength(0);
+    s3.restore();
+    resetS3ClientForTests();
   });
 
   it('createAdminNotifierFromConfig enables a channel only with a complete config', () => {

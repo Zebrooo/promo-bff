@@ -20,7 +20,11 @@ function reviewRow(id: number): CampaignReviewRow {
 
 function harness(rows: CampaignReviewRow[]) {
   const watcher = createNewCampaignWatcher({
-    review: { configured: true, listCampaigns: async (q) => rows.filter((r) => !q.ids || q.ids.includes(r.id)) },
+    review: {
+      configured: true,
+      listCampaignIds: async () => rows.map((r) => ({ id: r.id, status: r.status })),
+      listCampaigns: async (q) => rows.filter((r) => !q.ids || q.ids.includes(r.id)),
+    },
     store: createInMemorySeenCampaignsStore(),
     notifier: { channels: ['webPush'], notify: async () => ({ attempted: 1, delivered: 1, failed: 0 }) },
   });

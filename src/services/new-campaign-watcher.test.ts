@@ -13,11 +13,13 @@ function row(over: Partial<CampaignReviewRow> = {}): CampaignReviewRow {
   };
 }
 
-function fakeReview(rows: CampaignReviewRow[]): CampaignReviewService {
+function fakeReview(rows: CampaignReviewRow[]): CampaignReviewService & { listCampaigns: ReturnType<typeof vi.fn> } {
+  const select = (q: { ids?: number[]; statuses?: string[] }) =>
+    rows.filter((r) => (!q.ids || q.ids.includes(r.id)) && (!q.statuses || q.statuses.includes(r.status)));
   return {
     configured: true,
-    listCampaigns: vi.fn(async (q: { ids?: number[]; statuses?: string[] }) =>
-      rows.filter((r) => (!q.ids || q.ids.includes(r.id)) && (!q.statuses || q.statuses.includes(r.status)))),
+    listCampaignIds: vi.fn(async (q: { statuses?: string[] }) => select(q).map((r) => ({ id: r.id, status: r.status }))),
+    listCampaigns: vi.fn(async (q: { ids?: number[]; statuses?: string[] }) => select(q)),
   };
 }
 
@@ -39,14 +41,17 @@ describe('createNewCampaignWatcher.poll', () => {
     expect(notifier.notify).not.toHaveBeenCalled();
   });
 
-  it('after bootstrap a new campaign triggers exactly one notification', async () => {
+  it('after bootstrap a new campaign triggers exactly one notification; full rows are fetched only for new ids', async () => {
     const rows = [row({ id: 1 })];
     const store = createInMemorySeenCampaignsStore();
     const notifier = fakeNotifier();
-    const w = createNewCampaignWatcher({ review: fakeReview(rows), store, notifier, now, cabinetUrl: 'https://cab.example' });
+    const review = fakeReview(rows);
+    const w = createNewCampaignWatcher({ review, store, notifier, now, cabinetUrl: 'https://cab.example' });
     await w.poll();
+    expect(review.listCampaigns).not.toHaveBeenCalled();
     rows.push(row({ id: 2, name: 'Новая' }), row({ id: 3, status: 'draft' }));
     expect(await w.poll()).toEqual({ notified: [2] });
+    expect(review.listCampaigns).toHaveBeenCalledWith({ ids: [2], limit: 1 });
     expect(store.state?.campaigns['2']).toMatchObject({ seenAt: expect.any(String), notifiedAt: expect.any(String) });
     expect(store.state?.campaigns['3']).toBeUndefined(); // черновики не в счёт
     expect(notifier.notify).toHaveBeenCalledTimes(1);
@@ -59,7 +64,7 @@ describe('createNewCampaignWatcher.poll', () => {
     expect(notifier.notify).toHaveBeenCalledTimes(1);
   });
 
-  it('a failed delivery is not retried every poll (campaign stays seen, notifiedAt empty)', async () => {
+  it('a failed delivery (attempted but rejected) is not retried every poll', async () => {
     const rows = [row({ id: 1 })];
     const store = createInMemorySeenCampaignsStore();
     const notifier = fakeNotifier(0);
@@ -72,9 +77,41 @@ describe('createNewCampaignWatcher.poll', () => {
     expect(notifier.notify).toHaveBeenCalledTimes(1);
   });
 
+  it('when nobody could even be tried (no subscribers), the campaign is retried on the next poll', async () => {
+    const rows = [row({ id: 1 })];
+    const store = createInMemorySeenCampaignsStore();
+    const notifier: AdminNotifier & { notify: ReturnType<typeof vi.fn> } = {
+      channels: ['webPush'],
+      notify: vi.fn(async () => ({ attempted: 0, delivered: 0, failed: 0 })),
+    };
+    const w = createNewCampaignWatcher({ review: fakeReview(rows), store, notifier, now });
+    await w.poll();
+    rows.push(row({ id: 2 }));
+    expect(await w.poll()).toEqual({ notified: [] });
+    expect(store.state?.campaigns['2']).toBeUndefined();
+    notifier.notify.mockResolvedValue({ attempted: 1, delivered: 1, failed: 0 });
+    expect(await w.poll()).toEqual({ notified: [2] });
+    expect(notifier.notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('with no channel configured, new campaigns are left unseen and a warning is logged once', async () => {
+    const rows = [row({ id: 1 })];
+    const store = createInMemorySeenCampaignsStore();
+    const notifier: AdminNotifier & { notify: ReturnType<typeof vi.fn> } = { channels: [], notify: vi.fn() };
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const w = createNewCampaignWatcher({ review: fakeReview(rows), store, notifier, now, logger });
+    await w.poll();
+    rows.push(row({ id: 2 }));
+    await w.poll();
+    await w.poll();
+    expect(notifier.notify).not.toHaveBeenCalled();
+    expect(store.state?.campaigns['2']).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
   it('does nothing when the review service is unconfigured', async () => {
     const store = createInMemorySeenCampaignsStore();
-    const w = createNewCampaignWatcher({ review: { configured: false, listCampaigns: async () => [] }, store, notifier: fakeNotifier(), now });
+    const w = createNewCampaignWatcher({ review: { configured: false, listCampaignIds: async () => [], listCampaigns: async () => [] }, store, notifier: fakeNotifier(), now });
     expect(w.configured).toBe(false);
     expect(await w.poll()).toEqual({ notified: [] });
     expect(store.state).toBeNull();

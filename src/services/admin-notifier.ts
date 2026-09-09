@@ -11,7 +11,7 @@
  * уходит только счётчик доставок. Ничего чувствительного в текстах нет
  * (id кампании, название, суммы) — их видит и так любой админ кабинета.
  */
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { config, type AdminNotifyConfig } from '../config';
 import { getS3Client, isNoSuchKey, pushSubscriptionsKey } from './s3-client';
 import { sendWebPush, type VapidKeys, type WebPushSubscription } from './web-push';
@@ -19,7 +19,7 @@ import { sendWebPush, type VapidKeys, type WebPushSubscription } from './web-pus
 export interface AdminNotification {
   title: string;
   body: string;
-  /** Куда ведёт клик по уведомлению (страница модерации в кабинете). */
+  /** Куда ведёт клик по уведомлению (страница «Кампании» в кабинете). */
   url?: string;
   /** Группировка одинаковых уведомлений в браузере. */
   tag?: string;
@@ -53,6 +53,9 @@ export interface AdminNotifierDeps {
   webPush?: {
     keys: VapidKeys;
     loadSubscriptions(): Promise<PushSubscriptionRecord[]>;
+    /** Убрать подписки, которые push-сервис объявил мёртвыми (404/410) —
+     *  иначе каждая рассылка вечно шифрует и шлёт в пустоту. */
+    removeSubscriptions?(endpoints: string[]): Promise<void>;
   } | null;
   telegram?: { botToken: string; chatIds: string[] } | null;
   fetchImpl?: typeof fetch;
@@ -74,6 +77,25 @@ export async function readPushSubscriptionsFromS3(): Promise<PushSubscriptionRec
     throw err;
   }
   return parsePushSubscriptions(JSON.parse(text));
+}
+
+/** Удалить подписки по endpoint из S3-файла кабинета. Read-modify-write того
+ *  же объекта, что пишет кабинет; подписок единицы, а мёртвые endpoint'ы
+ *  никому не нужны, так что last-write-wins здесь безопасен. */
+export async function removePushSubscriptionsFromS3(endpoints: string[]): Promise<void> {
+  if (endpoints.length === 0) return;
+  const current = await readPushSubscriptionsFromS3();
+  const gone = new Set(endpoints);
+  const next = current.filter((s) => !gone.has(s.endpoint));
+  if (next.length === current.length) return;
+  await getS3Client().send(
+    new PutObjectCommand({
+      Bucket: config.s3.bucket,
+      Key: pushSubscriptionsKey(),
+      Body: JSON.stringify({ version: 1, subscriptions: next }, null, 2),
+      ContentType: 'application/json',
+    }),
+  );
 }
 
 export function parsePushSubscriptions(raw: unknown): PushSubscriptionRecord[] {
@@ -126,6 +148,7 @@ export function createAdminNotifier(deps: AdminNotifierDeps): AdminNotifier {
     );
     let delivered = 0;
     let failed = 0;
+    const gone: string[] = [];
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && r.value.ok) {
         delivered += 1;
@@ -134,11 +157,20 @@ export function createAdminNotifier(deps: AdminNotifierDeps): AdminNotifier {
       failed += 1;
       const endpointHost = (() => { try { return new URL(subs[i]!.endpoint).host; } catch { return '?'; } })();
       if (r.status === 'fulfilled') {
+        if (r.value.gone) gone.push(subs[i]!.endpoint);
         logger?.warn({ endpointHost, status: r.value.status, gone: r.value.gone }, 'admin-notifier: web push rejected');
       } else {
         logger?.warn({ endpointHost, err: r.reason }, 'admin-notifier: web push failed');
       }
     });
+    if (gone.length > 0 && wp.removeSubscriptions) {
+      try {
+        await wp.removeSubscriptions(gone);
+        logger?.info({ removed: gone.length }, 'admin-notifier: pruned dead push subscriptions');
+      } catch (err) {
+        logger?.warn({ err }, 'admin-notifier: cannot prune dead push subscriptions');
+      }
+    }
     return { attempted: subs.length, delivered, failed };
   }
 
@@ -198,6 +230,7 @@ export function createAdminNotifierFromConfig(
       ? {
           keys: { publicKey: webPush.vapidPublicKey, privateKey: webPush.vapidPrivateKey, subject: webPush.subject },
           loadSubscriptions: readPushSubscriptionsFromS3,
+          removeSubscriptions: removePushSubscriptionsFromS3,
         }
       : null,
     telegram: telegram.botToken && telegram.chatIds.length > 0 ? telegram : null,

@@ -41,6 +41,9 @@ export interface CampaignReviewRow {
 export interface CampaignReviewService {
   /** false = Supabase не задана (dev/тесты) — кампании не читаются. */
   configured: boolean;
+  /** Только id+status — дёшево, для ежеминутного опроса «что появилось»
+   *  (без jsonb креатива на тысячи строк). */
+  listCampaignIds(query: { statuses?: string[]; limit?: number }): Promise<{ id: number; status: string }[]>;
   /** Кампании по статусам и/или id (обе выборки — И). Без фильтров — все. */
   listCampaigns(query: { ids?: number[]; statuses?: string[]; limit?: number }): Promise<CampaignReviewRow[]>;
 }
@@ -71,7 +74,7 @@ function strArray(v: unknown): string[] | null {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null;
 }
 
-/** Экспортирован для тестов и для orchestrator'а (одна логика чтения строки). */
+/** Экспортирован для тестов (одна логика чтения строки). */
 export function mapCampaignRow(raw: Record<string, unknown>): CampaignReviewRow {
   const creative = raw.creative;
   const creativeTitle =
@@ -102,27 +105,45 @@ export function mapCampaignRow(raw: Record<string, unknown>): CampaignReviewRow 
 export function createCampaignReviewService(cfg: SupabaseConfig = config.supabase): CampaignReviewService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) {
-    return { configured: false, listCampaigns: async () => [] };
+    return { configured: false, listCampaignIds: async () => [], listCampaigns: async () => [] };
   }
   const table = `${url}/rest/v1/ad_campaigns`;
 
-  async function listCampaigns(query: { ids?: number[]; statuses?: string[]; limit?: number }): Promise<CampaignReviewRow[]> {
-    if (query.ids !== undefined && query.ids.length === 0) return [];
-    const parts = ['select=*', 'order=id.desc', `limit=${query.limit ?? CAMPAIGN_REVIEW_DEFAULT_LIMIT}`];
+  function buildQuery(select: string, query: { ids?: number[]; statuses?: string[]; limit?: number }): string {
+    const parts = [`select=${select}`, 'order=id.desc', `limit=${query.limit ?? CAMPAIGN_REVIEW_DEFAULT_LIMIT}`];
     if (query.statuses && query.statuses.length > 0) {
       parts.push(`status=in.(${query.statuses.map((s) => encodeURIComponent(s)).join(',')})`);
     }
     if (query.ids && query.ids.length > 0) {
       parts.push(`id=in.(${query.ids.map((id) => String(id)).join(',')})`);
     }
-    const res = await fetch(`${table}?${parts.join('&')}`, { headers: authHeaders(serviceRoleKey) });
+    return `${table}?${parts.join('&')}`;
+  }
+
+  async function fetchRows(url: string, signal: AbortSignal): Promise<Record<string, unknown>[]> {
+    const res = await fetch(url, { headers: authHeaders(serviceRoleKey), signal });
     if (!res.ok) throw new Error(`campaign-review read failed: HTTP ${res.status}`);
-    const rows = (await res.json()) as Record<string, unknown>[];
-    return rows.map(mapCampaignRow);
+    return (await res.json()) as Record<string, unknown>[];
+  }
+
+  // AbortController — чтобы по таймауту отменялся и сам HTTP-запрос, а не
+  // только промис: иначе ежеминутный опрос при медленной Supabase копил бы
+  // висящие соединения.
+  function timed<T>(label: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    return withTimeout(run(controller.signal), timeoutMs, label, controller);
   }
 
   return {
     configured: true,
-    listCampaigns: (query) => withTimeout(listCampaigns(query), timeoutMs, 'campaignReview.listCampaigns'),
+    listCampaignIds: (query) => timed('campaignReview.listCampaignIds', async (signal) => {
+      const rows = await fetchRows(buildQuery('id,status', query), signal);
+      return rows.map((r) => ({ id: num(r.id), status: String(r.status ?? '') }));
+    }),
+    listCampaigns: (query) => {
+      if (query.ids !== undefined && query.ids.length === 0) return Promise.resolve([]);
+      return timed('campaignReview.listCampaigns', async (signal) =>
+        (await fetchRows(buildQuery('*', query), signal)).map(mapCampaignRow));
+    },
   };
 }
