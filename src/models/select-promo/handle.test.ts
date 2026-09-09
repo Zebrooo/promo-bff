@@ -208,6 +208,18 @@ describe('handleSelectPromo', () => {
     });
   });
 
+  it('hands promoline afterListings to the client (renderable, NOT server-only)', async () => {
+    // Позиция строки в ленте читается витриной из Advertisement
+    // (@zebrooo/promo-renderer 0.16.0), поэтому strip её не трогает.
+    const ad = makePromo({ id: 'pl-8', format: 'promoline', title: 'Строка', afterListings: 8 });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });
+    const result = await handleSelectPromo({ userId: 'u1' }, deps({ configService }));
+    expect(result).toEqual({
+      status: 'ok',
+      data: { id: 'pl-8', format: 'promoline', title: 'Строка', afterListings: 8 },
+    });
+  });
+
   it('hands custom-format variant to the client (variant is renderable, NOT server-only)', async () => {
     const ad = makePromo({ id: 'cst-1', format: 'custom', title: 'Onboarding', variant: 'reklama-onboarding' });
     const configService = fakeConfigService({ getQueue: async () => ({ promos: [ad], persist: false }) });
@@ -1079,9 +1091,13 @@ describe('handleSelectPromo behavior signal (wave B)', () => {
     const configService = fakeConfigService({
       getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
     });
+    // Отметка просмотра фиксируется ДО вызова и с запасом: обработчик
+    // берёт `now` в начале, а сигнал запрашивает позже — просмотр «из будущего»
+    // (seenMs > nowMs) InterestChecker отвергает, и на медленном раннере тест флакал.
+    const lastViewedAt = new Date(Date.now() - 1000).toISOString();
     const behaviorSignalService = {
       getSignal: vi.fn(async () => ({
-        interests: [{ category: 'shiny', lastViewedAt: new Date().toISOString() }],
+        interests: [{ category: 'shiny', lastViewedAt }],
         phoneViews7d: 0,
       })),
     };
