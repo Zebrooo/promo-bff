@@ -239,11 +239,15 @@ export interface Promo {
    *  zr-multistep--fullscreen, @zebrooo/promo-renderer 0.11.0). A renderable
    *  field: handed to the client untouched (NOT in the handle.ts strip list). */
   presentation?: 'modal' | 'fullscreen';
-  /** Promoline format only: через сколько органических карточек ленты
-   *  каталога стоит строка (4..50, задаётся в кабинете). A renderable field:
-   *  handed to the client untouched (NOT in the handle.ts strip list); the
-   *  storefront moves its in-feed host to this position. Omitted = storefront
-   *  default (fourth card). */
+  /** Promoline format only: position of the row in the catalogue feed — after
+   *  how many organic listings (4..50; omitted = storefront default, the
+   *  fourth card). The lower bound is the storefront's "below the visible
+   *  area" rule: the promo is picked once the fourth card is already within
+   *  the first screen and the row is inserted only below it (no layout shift),
+   *  so an earlier position would never show. A renderable field: handed to
+   *  the client untouched (NOT in the handle.ts strip list) — the storefront
+   *  reads it, @zebrooo/promo-renderer 0.16.0 carries it on Advertisement.
+   *  Mirrors the cabinet schema. */
   afterListings?: number;
   /** Page sections this promo may show in (e.g. ['avto','realty']). Omitted = any section. */
   sections?: string[];

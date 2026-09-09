@@ -53,7 +53,7 @@ Surface → acceptable formats (from the current client-side filters):
 очередей `transport-{web,touch,mobile}`. `inline` в её списке форматов —
 переходная совместимость со старыми записями (id с префиксом
 `parts-rfq-promoline-`), новые промо заводятся в кабинете как `promoline`.
-`@zebrooo/promo-renderer` получает формат нативно для всех устройств (touch и
+`@zebrooo/promo-renderer` (с 0.16.0) знает формат нативно для всех устройств (touch и
 desktop), поэтому в desktop-only списке `DeviceChecker` его нет.
 
 Позиция строки в ленте — поле промо `afterListings` (promoline only, целое

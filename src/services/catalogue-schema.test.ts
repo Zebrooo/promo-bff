@@ -56,6 +56,39 @@ describe('promoSchema', () => {
     expect(parsed.textAlign).toBe('left');
   });
 
+  /** afterListings — позиция строки promoline в ленте (4..50). Плоская схема
+   *  BFF вырезала бы неизвестный ключ при парсе пула, а витрина читает поле из
+   *  Advertisement — поэтому оно объявлено явно и только для promoline. */
+  describe('afterListings (promoline, position in the feed)', () => {
+    it.each([4, 8, 50])('accepts %s on promoline and keeps it', (afterListings) => {
+      const parsed = promoSchema.parse(makePromo({ format: 'promoline', afterListings }));
+      expect(parsed.afterListings).toBe(afterListings);
+    });
+
+    it.each([3, 0, 51, 2.5])('rejects %s (bounds 4..50, integer)', (afterListings) => {
+      expect(() => promoSchema.parse(makePromo({ format: 'promoline', afterListings }))).toThrow();
+    });
+
+    it('is absent when not set (storefront default = the fourth card)', () => {
+      expect(promoSchema.parse(makePromo({ format: 'promoline' }))).not.toHaveProperty('afterListings');
+    });
+
+    it('rejects afterListings on non-promoline formats (mirror of the cabinet union strip)', () => {
+      for (const format of ['inline', 'popup', 'topline'] as const) {
+        expect(() => promoSchema.parse(makePromo({ format, afterListings: 8 })), format).toThrow();
+      }
+    });
+
+    it('parsePoolLeniently drops only the promo with a bad afterListings', () => {
+      const { promos, rejected } = parsePoolLeniently([
+        makePromo({ id: 'ok', format: 'promoline', afterListings: 6 }),
+        makePromo({ id: 'bad', format: 'promoline', afterListings: 2 }),
+      ]);
+      expect(promos.map((p) => p.id)).toEqual(['ok']);
+      expect(rejected.map((r) => r.promoId)).toEqual(['bad']);
+    });
+  });
+
   it('preserves the optional descriptionColor creative field', () => {
     const parsed = promoSchema.parse(makePromo({
       format: 'topline',
@@ -345,33 +378,6 @@ describe('multistep presentation (modal | fullscreen)', () => {
   it('rejects presentation on non-multistep formats (refine, mirrors the cabinet)', () => {
     expect(() => promoSchema.parse(makePromo({ presentation: 'fullscreen' }))).toThrow();
     expect(() => promoSchema.parse(makePromo({ presentation: 'modal' }))).toThrow();
-  });
-});
-
-describe('promoline afterListings (position of the row in the catalogue feed)', () => {
-  const promoline = (extra: Record<string, unknown> = {}) => makePromo({ format: 'promoline', ...extra });
-
-  it('accepts an integer position within 4..50 on a promoline promo', () => {
-    expect(promoSchema.parse(promoline({ afterListings: 8 })).afterListings).toBe(8);
-    expect(promoSchema.parse(promoline({ afterListings: 4 })).afterListings).toBe(4);
-    expect(promoSchema.parse(promoline({ afterListings: 50 })).afterListings).toBe(50);
-  });
-
-  it('is optional (omitted = storefront default, the fourth card)', () => {
-    expect(promoSchema.parse(promoline()).afterListings).toBeUndefined();
-  });
-
-  it('rejects values outside 4..50 and non-integers', () => {
-    // < 4: витрина вставляет строку только ниже первого экрана.
-    expect(() => promoSchema.parse(promoline({ afterListings: 3 }))).toThrow();
-    expect(() => promoSchema.parse(promoline({ afterListings: 0 }))).toThrow();
-    expect(() => promoSchema.parse(promoline({ afterListings: 51 }))).toThrow();
-    expect(() => promoSchema.parse(promoline({ afterListings: 2.5 }))).toThrow();
-  });
-
-  it('rejects afterListings on non-promoline formats (refine, mirrors the cabinet)', () => {
-    expect(() => promoSchema.parse(makePromo({ format: 'inline', afterListings: 8 }))).toThrow();
-    expect(() => promoSchema.parse(makePromo({ format: 'popup', afterListings: 8 }))).toThrow();
   });
 });
 
