@@ -59,7 +59,7 @@ describe('promoSchema', () => {
   /** afterListings — позиция строки promoline в ленте (4..50). Плоская схема
    *  BFF вырезала бы неизвестный ключ при парсе пула, а витрина читает поле из
    *  Advertisement — поэтому оно объявлено явно и только для promoline. */
-  describe('afterListings (promoline, позиция в ленте)', () => {
+  describe('afterListings (promoline, position in the feed)', () => {
     it.each([4, 8, 50])('accepts %s on promoline and keeps it', (afterListings) => {
       const parsed = promoSchema.parse(makePromo({ format: 'promoline', afterListings }));
       expect(parsed.afterListings).toBe(afterListings);
@@ -69,7 +69,7 @@ describe('promoSchema', () => {
       expect(() => promoSchema.parse(makePromo({ format: 'promoline', afterListings }))).toThrow();
     });
 
-    it('is absent when not set (витрина берёт умолчание — четвёртую карточку)', () => {
+    it('is absent when not set (storefront default = the fourth card)', () => {
       expect(promoSchema.parse(makePromo({ format: 'promoline' }))).not.toHaveProperty('afterListings');
     });
 
