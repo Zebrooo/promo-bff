@@ -53,7 +53,17 @@ Surface → acceptable formats (from the current client-side filters):
 очередей `transport-{web,touch,mobile}`. `inline` в её списке форматов —
 переходная совместимость со старыми записями (id с префиксом
 `parts-rfq-promoline-`), новые промо заводятся в кабинете как `promoline`.
-Рендереру формат не сообщается: витрина подменяет его на `inline` перед показом.
+`@zebrooo/promo-renderer` (с 0.16.0) знает формат нативно для всех устройств (touch и
+desktop), поэтому в desktop-only списке `DeviceChecker` его нет.
+
+Позиция строки в ленте — поле промо `afterListings` (promoline only, целое
+4..50; задаётся в кабинете, зеркалится `promoSchema` в
+`src/services/catalogue-schema.ts`): через сколько органических карточек стоит
+строка. Поле рендерабельное — `select-promo` отдаёт его витрине в `data`
+нетронутым, витрина переставляет хост строки под него; без поля витрина берёт
+своё умолчание (четвёртая карточка). Нижняя граница 4 — витрина вставляет строку
+только ниже первого экрана. На других форматах поле отвергается refine'ом
+(как `presentation` у `multistep`).
 
 `persist` (always-show) stops being a queue property and rides on per-request `skipCheckers` (already supported; topline already passes them). New catalog queues are all **non-persist**.
 
