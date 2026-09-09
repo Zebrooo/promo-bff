@@ -1091,9 +1091,13 @@ describe('handleSelectPromo behavior signal (wave B)', () => {
     const configService = fakeConfigService({
       getQueue: async () => ({ promos: [behaviorPromo()], persist: false }),
     });
+    // Отметка просмотра фиксируется ДО вызова и с запасом: обработчик
+    // берёт `now` в начале, а сигнал запрашивает позже — просмотр «из будущего»
+    // (seenMs > nowMs) InterestChecker отвергает, и на медленном раннере тест флакал.
+    const lastViewedAt = new Date(Date.now() - 1000).toISOString();
     const behaviorSignalService = {
       getSignal: vi.fn(async () => ({
-        interests: [{ category: 'shiny', lastViewedAt: new Date().toISOString() }],
+        interests: [{ category: 'shiny', lastViewedAt }],
         phoneViews7d: 0,
       })),
     };
