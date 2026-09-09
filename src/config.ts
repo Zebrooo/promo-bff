@@ -90,19 +90,17 @@ export interface AppConfig {
    *  задеть прод, работая со стендом (и наоборот). */
   aaTestSupabase: SupabaseConfig;
   support: SupportConfig;
-  /** Модерация рекламных кампаний рекламодателей (ad_campaigns) + уведомления
-   *  админам о новых кампаниях. */
-  campaignModeration: CampaignModerationConfig;
+  /** Уведомления админам о новых рекламных кампаниях (ad_campaigns). */
+  newCampaignWatch: NewCampaignWatchConfig;
   adminNotify: AdminNotifyConfig;
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
   ai: AiConfig;
 }
 
-export interface CampaignModerationConfig {
+export interface NewCampaignWatchConfig {
   /** Как часто опрашивать ad_campaigns на предмет новых кампаний (мс).
-   *  0 = поллер выключен (кампании тогда никогда не станут pending —
-   *  модерация де-факто отключена). */
+   *  0 = поллер выключен (пуши о новых кампаниях не идут). */
   pollIntervalMs: number;
   /** Публичный URL промо-кабинета (без trailing /) — ссылка «Открыть» в
    *  уведомлении админам. Пусто = уведомление без ссылки. */
@@ -195,8 +193,8 @@ export const config: AppConfig = {
     // reuse the ad system's fast-fail 2.5s timeout, or the bot reply is lost.
     supabaseTimeoutMs: Number(process.env.SUPPORT_SUPABASE_TIMEOUT_MS ?? 10000),
   },
-  campaignModeration: {
-    pollIntervalMs: Number(process.env.CAMPAIGN_MODERATION_POLL_MS ?? 60_000),
+  newCampaignWatch: {
+    pollIntervalMs: Number(process.env.NEW_CAMPAIGN_POLL_MS ?? 60_000),
     cabinetUrl: (process.env.PROMO_CABINET_URL ?? '').replace(/\/$/, ''),
   },
   adminNotify: {

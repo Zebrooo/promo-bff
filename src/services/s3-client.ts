@@ -29,10 +29,10 @@ export function queueKey(name: string): string {
   return `${config.s3.keyPrefix}queue-${name}.json`;
 }
 
-/** Состояние модерации рекламных кампаний (решения админов). Пишет и читает
- *  только BFF — см. campaign-moderation-store.ts. */
-export function campaignModerationKey(): string {
-  return `${config.s3.keyPrefix}campaign-moderation.json`;
+/** Какие рекламные кампании BFF уже видел (чтобы слать пуш о новой один
+ *  раз). Пишет и читает только BFF — см. new-campaign-watcher.ts. */
+export function seenCampaignsKey(): string {
+  return `${config.s3.keyPrefix}seen-campaigns.json`;
 }
 
 /** Web Push-подписки админов кабинета. Пишет КАБИНЕТ (тот же бакет и

@@ -40,7 +40,6 @@ describe('createCampaignReviewService', () => {
     const svc = createCampaignReviewService({ url: '', serviceRoleKey: '', timeoutMs: 1 });
     expect(svc.configured).toBe(false);
     expect(await svc.listCampaigns({})).toEqual([]);
-    expect(await svc.setStatus(1, 'active')).toEqual({ ok: false, error: 'not_configured' });
   });
 
   it('lists with status + id filters via select=*', async () => {
@@ -65,18 +64,5 @@ describe('createCampaignReviewService', () => {
   it('throws on a read failure', async () => {
     mockFetch(500, {});
     await expect(createCampaignReviewService(cfg).listCampaigns({})).rejects.toThrow(/HTTP 500/);
-  });
-
-  it('PATCHes the status and reports a PostgREST refusal as ok:false', async () => {
-    const fn = mockFetch(204, null);
-    expect(await createCampaignReviewService(cfg).setStatus(7, 'paused')).toEqual({ ok: true });
-    const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://db.example/rest/v1/ad_campaigns?id=eq.7');
-    expect(init.method).toBe('PATCH');
-    expect(init.body).toBe('{"status":"paused"}');
-    expect((init.headers as Record<string, string>).Prefer).toBe('return=minimal');
-
-    mockFetch(400, { message: 'check constraint' });
-    expect(await createCampaignReviewService(cfg).setStatus(7, 'nope')).toEqual({ ok: false, error: 'HTTP 400' });
   });
 });

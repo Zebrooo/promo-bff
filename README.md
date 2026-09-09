@@ -187,28 +187,17 @@ curl -X POST http://localhost:3000/models \
   -d '{"models":["select-promo"],"params":{"userId":"user123","context":{"platform":"web","locale":"ru"}}}'
 ```
 
-## Модерация рекламных кампаний и пуши админам
+## Пуши админам о новых рекламных кампаниях
 
 Кампании рекламодателей создаёт витрина (ЛК «Реклама» abkhaz-auto) прямо в
-своей Supabase (`ad_campaigns`); BFF их только читает для аукциона. Слой
-модерации (`src/services/campaign-moderation*.ts`) добавляет «сначала подтверди»:
-
-1. **Поллер** (`CAMPAIGN_MODERATION_POLL_MS`, по умолчанию 60 с; `0` —
-   выключен) читает `ad_campaigns` со статусами `active`/`pending`. Первый
-   запуск без файла состояния — bootstrap: всё, что уже есть, считается
-   одобренным (включение фичи не гасит работающую рекламу). Каждая НОВАЯ
-   кампания заводится в `pending` и админам уходит уведомление.
-2. **Аукцион** (`/auction`, `/feed-fill`) видит только `approved`-кампании.
-   Фильтр fail-open: пока состояние ни разу не прочитано из S3 или bootstrap
-   не прошёл, кандидаты не фильтруются.
-3. **Решение** админ принимает в промо-кабинете (`/cabinet/campaigns`) —
-   ручки `POST /campaign-moderation/list` и `POST /campaign-moderation/decide`
-   (`{ campaignId, decision: approved|rejected, reason?, actor? }`), та же
-   авторизация service-ticket'ом, что у `/leads`. Решения хранятся в S3
-   (`campaign-moderation.json`, рядом с `promos.json`); в БД витрины BFF
-   пишет best-effort: approve переводит `pending` → `active`, reject ставит
-   `paused`. В выдаче списка для каждой кампании есть баланс кошелька
-   рекламодателя (`ledger_accounts`) и флаг `zeroBalance`.
+своей Supabase (`ad_campaigns`). Поллер (`src/services/new-campaign-watcher.ts`,
+интервал `NEW_CAMPAIGN_POLL_MS`, по умолчанию 60 с; `0` — выключен) читает
+кампании со статусами `active`/`pending` и о каждой ещё не виденной шлёт
+админам промо-кабинета уведомление. «Уже видели» хранится в S3
+(`seen-campaigns.json`, рядом с `promos.json`); первый запуск без файла —
+bootstrap: всё существующее помечается виденным без уведомлений. На аукцион
+это не влияет. `POST /new-campaigns/recent` (service-ticket, как `/leads`)
+отдаёт последние новые кампании для страницы кабинета.
 
 Каналы уведомлений (оба опциональны, включаются конфигом):
 

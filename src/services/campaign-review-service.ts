@@ -1,8 +1,8 @@
 /**
- * Чтение/правка рекламных кампаний рекламодателей (supabase-aa `ad_campaigns`)
- * для МОДЕРАЦИИ — в отличие от campaign-service.ts, который читает только
- * активные кампании для аукциона узким select'ом, здесь нужны все поля карточки
- * (кто, когда, сколько, что за креатив) и возможность поменять статус.
+ * Чтение рекламных кампаний рекламодателей (supabase-aa `ad_campaigns`) для
+ * уведомлений о новых — в отличие от campaign-service.ts, который читает
+ * только активные кампании для аукциона узким select'ом, здесь нужны поля
+ * карточки (кто, когда, сколько, что за креатив).
  *
  * `select=*` сознательно: схему таблицы ведёт витрина (abkhaz-auto), и мы не
  * хотим падать 400-м PostgREST из-за колонки, которой на этом стенде ещё/уже
@@ -39,13 +39,10 @@ export interface CampaignReviewRow {
 }
 
 export interface CampaignReviewService {
-  /** false = Supabase не задана (dev/тесты) — модерация недоступна. */
+  /** false = Supabase не задана (dev/тесты) — кампании не читаются. */
   configured: boolean;
   /** Кампании по статусам и/или id (обе выборки — И). Без фильтров — все. */
   listCampaigns(query: { ids?: number[]; statuses?: string[]; limit?: number }): Promise<CampaignReviewRow[]>;
-  /** PATCH status. ok:false — PostgREST ответил не-2xx (например, CHECK на
-   *  статус не знает такого значения); сетевой сбой — throw. */
-  setStatus(id: number, status: string): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 export const CAMPAIGN_REVIEW_DEFAULT_LIMIT = 200;
@@ -105,11 +102,7 @@ export function mapCampaignRow(raw: Record<string, unknown>): CampaignReviewRow 
 export function createCampaignReviewService(cfg: SupabaseConfig = config.supabase): CampaignReviewService {
   const { url, serviceRoleKey, timeoutMs } = cfg;
   if (!url || !serviceRoleKey) {
-    return {
-      configured: false,
-      listCampaigns: async () => [],
-      setStatus: async () => ({ ok: false, error: 'not_configured' }),
-    };
+    return { configured: false, listCampaigns: async () => [] };
   }
   const table = `${url}/rest/v1/ad_campaigns`;
 
@@ -128,23 +121,8 @@ export function createCampaignReviewService(cfg: SupabaseConfig = config.supabas
     return rows.map(mapCampaignRow);
   }
 
-  async function setStatus(id: number, status: string): Promise<{ ok: true } | { ok: false; error: string }> {
-    const res = await fetch(`${table}?id=eq.${encodeURIComponent(String(id))}`, {
-      method: 'PATCH',
-      headers: {
-        ...authHeaders(serviceRoleKey),
-        'content-type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true };
-  }
-
   return {
     configured: true,
     listCampaigns: (query) => withTimeout(listCampaigns(query), timeoutMs, 'campaignReview.listCampaigns'),
-    setStatus: (id, status) => withTimeout(setStatus(id, status), timeoutMs, 'campaignReview.setStatus'),
   };
 }
