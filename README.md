@@ -187,6 +187,38 @@ curl -X POST http://localhost:3000/models \
   -d '{"models":["select-promo"],"params":{"userId":"user123","context":{"platform":"web","locale":"ru"}}}'
 ```
 
+## Модерация рекламных кампаний и пуши админам
+
+Кампании рекламодателей создаёт витрина (ЛК «Реклама» abkhaz-auto) прямо в
+своей Supabase (`ad_campaigns`); BFF их только читает для аукциона. Слой
+модерации (`src/services/campaign-moderation*.ts`) добавляет «сначала подтверди»:
+
+1. **Поллер** (`CAMPAIGN_MODERATION_POLL_MS`, по умолчанию 60 с; `0` —
+   выключен) читает `ad_campaigns` со статусами `active`/`pending`. Первый
+   запуск без файла состояния — bootstrap: всё, что уже есть, считается
+   одобренным (включение фичи не гасит работающую рекламу). Каждая НОВАЯ
+   кампания заводится в `pending` и админам уходит уведомление.
+2. **Аукцион** (`/auction`, `/feed-fill`) видит только `approved`-кампании.
+   Фильтр fail-open: пока состояние ни разу не прочитано из S3 или bootstrap
+   не прошёл, кандидаты не фильтруются.
+3. **Решение** админ принимает в промо-кабинете (`/cabinet/campaigns`) —
+   ручки `POST /campaign-moderation/list` и `POST /campaign-moderation/decide`
+   (`{ campaignId, decision: approved|rejected, reason?, actor? }`), та же
+   авторизация service-ticket'ом, что у `/leads`. Решения хранятся в S3
+   (`campaign-moderation.json`, рядом с `promos.json`); в БД витрины BFF
+   пишет best-effort: approve переводит `pending` → `active`, reject ставит
+   `paused`. В выдаче списка для каждой кампании есть баланс кошелька
+   рекламодателя (`ledger_accounts`) и флаг `zeroBalance`.
+
+Каналы уведомлений (оба опциональны, включаются конфигом):
+
+| env | назначение |
+| --- | --- |
+| `WEB_PUSH_VAPID_PUBLIC_KEY` / `WEB_PUSH_VAPID_PRIVATE_KEY` | пара VAPID (`npx web-push generate-vapid-keys`); публичный ключ тот же, что `WEB_PUSH_VAPID_PUBLIC_KEY` у кабинета. Подписки браузеров админов кабинет пишет в S3 (`push-subscriptions.json`), BFF их читает при рассылке. Web Push реализован на `node:crypto` (`src/services/web-push.ts`), без внешних пакетов. |
+| `WEB_PUSH_SUBJECT` | VAPID `sub` — `mailto:` или https-URL владельца (дефолт — origin витрины). |
+| `ADMIN_TELEGRAM_BOT_TOKEN` / `ADMIN_TELEGRAM_CHAT_IDS` | бот и чаты (через запятую) для Telegram-уведомлений. |
+| `PROMO_CABINET_URL` | публичный URL кабинета — ссылка «Открыть» в уведомлении. |
+
 ## Adding a model
 
 Write `validate` + `handle`, then add one entry to

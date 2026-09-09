@@ -22,7 +22,11 @@ import { createListingService } from './services/listing-service';
 import { createSearchHistoryService } from './services/search-history-service';
 import { createBehaviorSignalService } from './services/behavior-signal-service';
 import { createPurchaseLedgerService } from './services/purchase-ledger-service';
-import { createCampaignService } from './services/campaign-service';
+import { createCampaignService, type CampaignService } from './services/campaign-service';
+import { createCampaignReviewService } from './services/campaign-review-service';
+import { createS3ModerationStore } from './services/campaign-moderation-store';
+import { createAdminNotifierFromConfig } from './services/admin-notifier';
+import { createCampaignModeration, type CampaignModeration } from './services/campaign-moderation';
 import { createBalanceService } from './services/balance-service';
 import { isModelName, modelRegistry } from './models/registry';
 import type { SelectPromoDeps } from './models/select-promo/handle';
@@ -71,10 +75,17 @@ export interface BuildServerOptions {
         leadStore: LeadStore;
         /** test/prod пара — держим оба стора, роут резолвит нужный по body.env. */
         aaAdminStores: Record<'test' | 'prod', AaAdminStore>;
+        /** Модерация кампаний рекламодателей (/campaign-moderation/*) +
+         *  фильтр approved-кампаний перед аукционом. */
+        campaignModeration: CampaignModeration;
       }
   >;
   /** Fastify logging; defaults to on. Tests pass false to keep output clean. */
   logger?: boolean;
+  /** Запускать поллер новых кампаний (см. campaign-moderation.ts). Только
+   *  для реального процесса (server.ts как entrypoint); тесты и embedding
+   *  не трогают сеть по таймеру. */
+  startCampaignModerationPoller?: boolean;
 }
 
 /**
@@ -176,28 +187,54 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // отношения не имеет, его единственный потребитель — GET /leads ниже.
   const leadStore: LeadStore = opts.deps?.leadStore ?? createLeadStore();
 
+  // Модерация кампаний: новые кампании витрины попадают в аукцион только
+  // после подтверждения админом в кабинете. Обёртка над campaign-service
+  // отсекает не-approved кандидатов; сам фильтр fail-open (см. шапку модуля).
+  // Кошельки рекламодателей — ВСЕГДА abkhaz-auto Supabase (см. комментарий у
+  // auctionDeps ниже); один экземпляр на аукцион, feed-fill и модерацию.
+  const advertiserBalanceService = opts.deps?.balanceService ?? createBalanceService(config.aaSupabase);
+  const campaignModeration: CampaignModeration = opts.deps?.campaignModeration ?? createCampaignModeration({
+    review: createCampaignReviewService(),
+    store: createS3ModerationStore(),
+    balances: advertiserBalanceService,
+    notifier: createAdminNotifierFromConfig(config.adminNotify, app.log),
+    logger: app.log,
+    cabinetUrl: config.campaignModeration.cabinetUrl,
+  });
+  const rawCampaignService: CampaignService = opts.deps?.campaignService ?? createCampaignService();
+  const moderatedCampaignService: CampaignService = {
+    getCampaignsForSlot: async (slot) => campaignModeration.filterApproved(await rawCampaignService.getCampaignsForSlot(slot)),
+    getActiveBannerCampaigns: async () => campaignModeration.filterApproved(await rawCampaignService.getActiveBannerCampaigns()),
+  };
+  if (opts.startCampaignModerationPoller) {
+    campaignModeration.start(config.campaignModeration.pollIntervalMs);
+    app.addHook('onClose', async () => { campaignModeration.stop(); });
+  }
+
   const auctionDeps: AuctionDeps = {
-    campaignService: createCampaignService(),
     // Same fix as the SelectPromoDeps instance above: balance-service.ts always
     // reads abkhaz-auto Supabase's ledger_accounts (its own doc comment says so),
     // never the promo Supabase — the two only coincide today because
     // docker-compose pins PROMO_SUPABASE_URL to AA_SUPABASE_URL. Passing the bare
     // default (config.supabase) would silently read the wrong instance the day
     // that infra accident is undone.
-    balanceService: createBalanceService(config.aaSupabase),
+    balanceService: advertiserBalanceService,
     logger: app.log,
     ...opts.deps,
+    // Тестовый campaignService из opts.deps тоже проходит через модерацию —
+    // иначе фильтр было бы не проверить через HTTP.
+    campaignService: moderatedCampaignService,
   };
 
   // Feed-fill reuses the auction's campaign + balance services, plus a dedicated
   // feed-frequency service (banner_view_events rolling counts) for the cap. Same
   // test-injection override (opts.deps) as the other dep bundles.
   const feedFillDeps: FeedFillDeps = {
-    campaignService: auctionDeps.campaignService,
     balanceService: auctionDeps.balanceService,
     feedFrequencyService: createFeedFrequencyService(),
     logger: app.log,
     ...opts.deps,
+    campaignService: moderatedCampaignService,
   };
 
   // Singletons for the lifetime of this server instance — cache hits and
@@ -1031,6 +1068,51 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
   });
 
+  // ── Модерация рекламных кампаний (промо-кабинет) ──────────────────────
+  // Та же авторизация service-ticket'ом, что у /leads и /aa-admin/*. Кабинет
+  // видит очередь на подтверждение и историю решений; решение пишется в S3
+  // (и best-effort в статус кампании в БД витрины, см. campaign-moderation.ts).
+  app.post('/campaign-moderation/list', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    if (!campaignModeration.configured) return reply.code(503).send({ error: 'moderation_not_configured' });
+    try {
+      return reply.code(200).send(await campaignModeration.list());
+    } catch (err) {
+      app.log.error({ err }, 'POST /campaign-moderation/list failed');
+      return reply.code(502).send({ error: 'moderation_unavailable' });
+    }
+  });
+
+  app.post('/campaign-moderation/decide', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    if (!campaignModeration.configured) return reply.code(503).send({ error: 'moderation_not_configured' });
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const campaignId = body.campaignId;
+    if (typeof campaignId !== 'number' || !Number.isInteger(campaignId) || campaignId <= 0) {
+      return reply.code(400).send({ error: 'bad_request', reason: 'campaignId must be a positive integer' });
+    }
+    const decision = body.decision;
+    if (decision !== 'approved' && decision !== 'rejected') {
+      return reply.code(400).send({ error: 'bad_request', reason: 'decision must be approved | rejected' });
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.slice(0, 500) : undefined;
+    const actorRaw = typeof body.actor === 'string' && body.actor.trim() ? body.actor.trim().slice(0, 64) : null;
+    const actor = actorRaw ?? auth.clientId ?? 'promo-cabinet';
+    try {
+      const result = await campaignModeration.decide(campaignId, decision, actor, reason);
+      if (!result.ok) {
+        if (result.error === 'not_found') return reply.code(404).send({ error: 'not_found' });
+        return reply.code(503).send({ error: 'moderation_not_configured' });
+      }
+      return reply.code(200).send({ ok: true, campaign: result.campaign });
+    } catch (err) {
+      app.log.error({ err, campaignId }, 'POST /campaign-moderation/decide failed');
+      return reply.code(502).send({ error: 'moderation_unavailable' });
+    }
+  });
+
   // Liveness + readiness probes (unauthenticated — for the orchestrator, not data).
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/ready', async (_request, reply) => {
@@ -1051,7 +1133,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 const invokedDirectly =
   process.argv[1] !== undefined && process.argv[1] === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  const app = buildServer();
+  const app = buildServer({ startCampaignModerationPoller: true });
   const processErrorStore = createErrorStore();
   const recordFatal = (err: unknown, kind: string) =>
     processErrorStore
