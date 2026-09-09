@@ -41,6 +41,12 @@ export function pushSubscriptionsKey(): string {
   return `${config.s3.keyPrefix}push-subscriptions.json`;
 }
 
+/** Пуш-кампании промо-кабинета (раздел «Push-рассылки»). Пишет и читает
+ *  только BFF — кабинет ходит через /push-campaigns/*. */
+export function pushCampaignsKey(): string {
+  return `${config.s3.keyPrefix}push-campaigns.json`;
+}
+
 /** True when an S3 error means "the object does not exist yet". */
 export function isNoSuchKey(err: unknown): boolean {
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
