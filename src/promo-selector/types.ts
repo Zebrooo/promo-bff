@@ -243,10 +243,6 @@ export interface Promo {
   ctaTextColor?: string;
   /** Text alignment inside overlay/inline body. Default 'left'. */
   textAlign?: 'left' | 'center' | 'right';
-  /** Popup layout variant: 'classic' = title+desc stacked, 'split' = image-left/text-right. */
-  popupVariant?: 'classic' | 'split';
-  /** Optional bullet list rendered below description (max 6 × 80 chars). */
-  bullets?: string[];
   /** DivKit format: URL to JSON-tree in S3 (rendered via @divkitframework/divkit). */
   divkitUrl?: string;
   /** Tooltip format only: id of the canonical host anchor element to point at
