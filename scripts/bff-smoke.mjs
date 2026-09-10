@@ -15,7 +15,9 @@
  *   3. for each required format there is ≥1 ACTIVE promo of that format in
  *      the queue (format + show window read from promos.json). A queue with
  *      promos but ZERO active ones across all its required formats FAILS —
- *      the slot is dark while the cabinet looks populated.
+ *      the slot is dark while the cabinet looks populated. A queue declared
+ *      with `requiredFormats: []` is checked for structure only (1 and 2):
+ *      the format set belongs to the caller's route params, not to this file.
  *
  * Severity: an empty queue and per-format gaps are WARN by default; pass
  * `--strict-empty` to turn an EMPTY queue into a failure (e.g. in CI for a
@@ -39,22 +41,34 @@
  * Keep in sync with abkhaz-auto's promo-slots wiring + the ad-cabinet's
  * PROD_SERVED_QUEUES (src/lib/catalogue.ts).
  */
+const CATALOGS = ['home', 'transport', 'realty', 'goods', 'services', 'jobs', 'news', 'listing'];
+const DEVICES = ['web', 'touch', 'mobile'];
+
 const PROD_QUEUES = [
-  { queue: 'home-banner',        requiredFormats: ['topline'] },
-  { queue: 'home-popup',         requiredFormats: ['popup', 'fullscreen', 'inline', 'divkit'] },
-  { queue: 'tooltip',            requiredFormats: ['tooltip'] },
-  { queue: 'cabinet-onboarding', requiredFormats: ['tooltip'] },
-  // Per-catalog queues (step C of docs/2026-07-01-per-catalog-queues.md).
-  // Uncomment when the storefront cuts over to per-catalog queues; each queue
-  // serves both the topline surface and the overlay surface of its catalog:
-  // { queue: 'home',      requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'transport', requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'realty',    requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'goods',     requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'services',  requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'jobs',      requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'news',      requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
-  // { queue: 'listing',   requiredFormats: ['topline', 'popup', 'fullscreen', 'inline', 'divkit'] },
+  // Fixed-name slots the storefront requests by literal name.
+  { queue: 'persistent-topline', requiredFormats: ['topline'] }, // fp/topline/route.ts
+  { queue: 'persistent-inline',  requiredFormats: ['inline'] },  // fp/inline/route.ts
+  { queue: 'tooltip',            requiredFormats: ['tooltip'] }, // fp/tooltip/route.ts
+  { queue: 'cabinet-onboarding', requiredFormats: ['tooltip'] }, // fp/onboarding/route.ts
+
+  // Per-device queues — the ONLY queues the catalog surfaces read. Both
+  // fp/o/route.ts (overlay) and fp/promoline/route.ts (feed row) build the
+  // name as `${catalogFromPath(path)}-${device}`, device = web|touch|mobile.
+  //
+  // requiredFormats is deliberately EMPTY: which formats each surface asks for
+  // is decided by abkhaz-auto's route params, not here, and guessing would turn
+  // this smoke into noise. Empty = structure only — the queue must be
+  // registered, readable and not all-dangling. That is exactly the class of
+  // failure that kept the promoline row invisible: the cabinet showed a
+  // populated queue while the storefront read a different name.
+  ...CATALOGS.flatMap((c) => DEVICES.map((d) => ({ queue: `${c}-${d}`, requiredFormats: [] }))),
+
+  // home-banner / home-popup removed 2026-09-10. Audit of abkhaz-auto src/
+  // confirmed neither name reaches the BFF: they were orphaned in 50271b2
+  // (#77, "Overlay + topline no longer pin home-popup/home-banner") and today
+  // survive only as cabinet slot ids (column campaign.slot), never as a queue.
+  // The bare catalog names (home, transport, ...) were orphaned in d5e4520
+  // (#113) by the per-device cutover and are covered above with a suffix.
 ];
 
 // ---------------------------------------------------------------------------
@@ -124,8 +138,18 @@ function checkQueues(state, matrix, { strictEmpty, now }) {
       continue;
     }
 
-    // Per-format coverage: ≥1 ACTIVE promo per required format.
     const active = resolved.filter((p) => isActive(p, now));
+
+    // Structure-only queue (requiredFormats: []): the caller does not pin the
+    // format set, so coverage is not checked. Everything above still applies —
+    // registered, readable, resolvable ids.
+    if (requiredFormats.length === 0) {
+      const danglingNote = dangling.length > 0 ? ` \u00b7 ${dangling.length} dangling: ${JSON.stringify(dangling)}` : '';
+      lines.push(`OK   ${queue.padEnd(20)} active=${active.length}/${resolved.length}${danglingNote}`);
+      continue;
+    }
+
+    // Per-format coverage: \u22651 ACTIVE promo per required format.
     const countByFormat = new Map(requiredFormats.map((f) => [f, 0]));
     for (const p of active) {
       if (countByFormat.has(p.format)) countByFormat.set(p.format, countByFormat.get(p.format) + 1);
@@ -167,14 +191,28 @@ function runSelfTest() {
       { id: 'tt1', format: 'tooltip', ...win },
     ],
     // cabinet-onboarding deliberately unregistered AND its object missing.
-    queuesIndex: [{ name: 'home-banner' }, { name: 'home-popup' }, { name: 'tooltip' }, { name: 'dead-queue' }],
+    queuesIndex: [
+      { name: 'persistent-topline' }, { name: 'persistent-inline' },
+      { name: 'tooltip' }, { name: 'transport-web' }, { name: 'dead-queue' },
+    ],
     queueObjects: {
-      'home-banner': { persist: true, ids: ['t1', 'ghost'] }, // OK + 1 dangling
-      'home-popup': { persist: false, ids: ['p-old'] },       // non-empty but 0 active → FAIL
-      tooltip: { persist: false, ids: [] },                   // empty → WARN (FAIL with --strict-empty)
-      // 'cabinet-onboarding' object intentionally absent      → MISSING → FAIL
+      'persistent-topline': { persist: true, ids: ['t1', 'ghost'] }, // OK + 1 dangling
+      'persistent-inline': { persist: false, ids: ['p-old'] },       // non-empty but 0 active → FAIL
+      tooltip: { persist: false, ids: [] },                          // empty → WARN (FAIL with --strict-empty)
+      'transport-web': { persist: false, ids: ['p1'] },              // structure-only → OK, no format check
+      // 'cabinet-onboarding' object intentionally absent             → MISSING → FAIL
     },
   };
+
+  // The self-test pins its own matrix: it exercises the check core, and must not
+  // start failing every time the prod queue list is edited.
+  const SELF_TEST_QUEUES = [
+    { queue: 'persistent-topline', requiredFormats: ['topline'] },
+    { queue: 'persistent-inline',  requiredFormats: ['inline'] },
+    { queue: 'tooltip',            requiredFormats: ['tooltip'] },
+    { queue: 'cabinet-onboarding', requiredFormats: ['tooltip'] },
+    { queue: 'transport-web',      requiredFormats: [] },
+  ];
 
   const assert = (cond, label) => {
     if (!cond) {
@@ -184,22 +222,28 @@ function runSelfTest() {
     console.log(`[bff-smoke:dry-run] ok — ${label}`);
   };
 
-  const res = checkQueues(fixtures, PROD_QUEUES, { strictEmpty: false, now });
-  assert(res.lines.some((l) => l.includes('home-banner') && l.includes('topline=1')), 'home-banner passes with topline=1');
+  const res = checkQueues(fixtures, SELF_TEST_QUEUES, { strictEmpty: false, now });
+  assert(res.lines.some((l) => l.includes('persistent-topline') && l.includes('topline=1')), 'persistent-topline passes with topline=1');
   assert(res.lines.some((l) => l.includes('1 dangling')), 'dangling id is reported on an OK queue');
-  assert(res.failures.some((f) => f.includes('home-popup') && f.includes('0 ACTIVE')), 'expired-only queue fails (0 active)');
+  assert(res.failures.some((f) => f.includes('persistent-inline') && f.includes('0 ACTIVE')), 'expired-only queue fails (0 active)');
+  assert(res.lines.some((l) => l.includes('transport-web') && l.includes('active=1/1')), 'structure-only queue passes without a format check');
+  assert(
+    res.lines.find((l) => l.includes('transport-web'))?.includes('popup=') === false,
+    'structure-only queue prints no per-format summary',
+  );
+  assert(!res.failures.some((f) => f.includes('transport-web')), 'structure-only queue with an off-list format is not a failure');
   assert(res.warnings.some((w) => w.includes('"tooltip"') && w.includes('EMPTY')), 'empty queue warns by default');
   assert(!res.failures.some((f) => f.includes('"tooltip"')), 'empty queue is not a failure by default');
   assert(res.failures.some((f) => f.includes('cabinet-onboarding') && f.includes('not registered')), 'unregistered queue fails');
   assert(res.failures.some((f) => f.includes('queue-cabinet-onboarding.json is MISSING')), 'missing queue object fails distinctly from empty');
 
-  const strict = checkQueues(fixtures, PROD_QUEUES, { strictEmpty: true, now });
+  const strict = checkQueues(fixtures, SELF_TEST_QUEUES, { strictEmpty: true, now });
   assert(strict.failures.some((f) => f.includes('"tooltip"') && f.includes('EMPTY')), '--strict-empty turns the empty queue into a failure');
 
-  const noIndex = checkQueues({ ...fixtures, queuesIndex: null }, PROD_QUEUES, { strictEmpty: false, now });
+  const noIndex = checkQueues({ ...fixtures, queuesIndex: null }, SELF_TEST_QUEUES, { strictEmpty: false, now });
   assert(noIndex.failures.some((f) => f.includes('queues.json missing')), 'missing queues.json index fails');
 
-  const noPool = checkQueues({ ...fixtures, pool: null }, PROD_QUEUES, { strictEmpty: false, now });
+  const noPool = checkQueues({ ...fixtures, pool: null }, SELF_TEST_QUEUES, { strictEmpty: false, now });
   assert(noPool.failures.some((f) => f.includes('promos.json missing')), 'missing pool fails');
 
   console.log('');
