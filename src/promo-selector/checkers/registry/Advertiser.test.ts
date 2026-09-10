@@ -13,7 +13,6 @@ const signal = (over: Partial<AdvertiserSignal> = {}): AdvertiserSignal => ({
   lastLaunchedAt: null,
   spentKopecks: 0,
   budgetExhausted: false,
-  activeEndsAt: null,
   wizardEvents: [],
   wizardWindowDays: 90,
   ...over,
@@ -31,7 +30,6 @@ function context(rule: Rule, over: Partial<Parameters<typeof makeCheckContext>[0
 }
 
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
-const daysAhead = (n: number) => new Date(NOW.getTime() + n * 24 * 60 * 60 * 1000).toISOString();
 
 describe('hasAdvertiserRule / helpers', () => {
   it('true only for a real condition; modifiers and an empty status list do not count', () => {
@@ -41,7 +39,7 @@ describe('hasAdvertiserRule / helpers', () => {
     expect(hasAdvertiserRule(makePromo({ targeting: { advertiser: { campaignStatuses: [] } } }))).toBe(false);
     for (const rule of [
       { campaignStatuses: ['active'] }, { hasActiveCampaign: false }, { everLaunched: true }, { abandonedWizard: true },
-      { paidCampaigns: false }, { budgetExhausted: true }, { endsWithinDays: 7 }, { walletAtMostKopecks: 0 },
+      { paidCampaigns: false }, { budgetExhausted: true }, { walletAtMostKopecks: 0 },
     ] as Rule[]) {
       expect(hasAdvertiserRule(makePromo({ targeting: { advertiser: rule } })), JSON.stringify(rule)).toBe(true);
     }
@@ -138,12 +136,10 @@ describe('AdvertiserChecker', () => {
     expect(checker.check(context({ budgetExhausted: false }))).toBe(true);
   });
 
-  it('endsWithinDays: active campaign ending inside [now, now + N days]', () => {
-    expect(checker.check(context({ endsWithinDays: 7 }, { advertiser: signal({ hasActive: true, activeEndsAt: daysAhead(3) }) }))).toBe(true);
-    expect(checker.check(context({ endsWithinDays: 7 }, { advertiser: signal({ hasActive: true, activeEndsAt: daysAhead(10) }) }))).toBe(false);
-    expect(checker.check(context({ endsWithinDays: 7 }, { advertiser: signal({ hasActive: true, activeEndsAt: daysAgo(1) }) }))).toBe(false);
-    expect(checker.check(context({ endsWithinDays: 7 }))).toBe(false);
-    expect(checker.check(context({ endsWithinDays: 0 }, { advertiser: signal({ activeEndsAt: daysAhead(1) }) }))).toBe(false);
+  it('a stale endsWithinDays key in a hand-edited pool is not a rule (поле убрано: у ad_campaigns нет даты окончания)', () => {
+    const promo = makePromo({ targeting: { advertiser: { endsWithinDays: 7 } as never } });
+    expect(hasAdvertiserRule(promo)).toBe(false);
+    expect(checker.shouldSkip(makeCheckContext({ promo }))).toBe('no advertiser targeting');
   });
 
   it('walletAtMostKopecks: absent wallet = 0, failed fetch = fail closed', () => {

@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeAdvertiserSignal, createAdvertiserSignalService, mapCampaignRow, EMPTY_ADVERTISER_SIGNAL,
-  type AdvertiserCampaignRow,
+  AD_CAMPAIGN_SIGNAL_COLUMNS, type AdvertiserCampaignRow,
 } from './advertiser-signal-service';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const cfg = { url: 'https://db.example', serviceRoleKey: 'secret', timeoutMs: 2000 };
 // 12:00 UTC = 15:00 МСК того же дня.
 const NOW = new Date('2026-09-09T12:00:00.000Z');
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
-const daysAhead = (n: number) => new Date(NOW.getTime() + n * 24 * 60 * 60 * 1000).toISOString();
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -19,8 +20,6 @@ const row = (over: Partial<AdvertiserCampaignRow> = {}): AdvertiserCampaignRow =
   status: 'active',
   createdAt: daysAgo(10),
   updatedAt: daysAgo(5),
-  startsAt: null,
-  endsAt: null,
   spentKopecks: 0,
   totalBudgetKopecks: null,
   dailyBudgetKopecks: null,
@@ -30,17 +29,30 @@ const row = (over: Partial<AdvertiserCampaignRow> = {}): AdvertiserCampaignRow =
 });
 
 describe('mapCampaignRow', () => {
-  it('maps a PostgREST row defensively (string numerics, alt column names, junk dates)', () => {
+  it('maps a PostgREST row defensively (string numerics, junk dates)', () => {
     expect(mapCampaignRow({
-      status: 'paused', created_at: '2026-09-01T00:00:00+00:00', updated_at: 'nope', start_at: '2026-09-02T00:00:00+00:00',
-      end_at: '2026-09-30T00:00:00+00:00', spent_kopecks: '1500', total_budget_kopecks: '100000', daily_budget_kopecks: null,
+      status: 'paused', created_at: '2026-09-01T00:00:00+00:00', updated_at: 'nope',
+      spent_kopecks: '1500', total_budget_kopecks: '100000', daily_budget_kopecks: null,
       spent_today_kopecks: 'x', spent_today_date: '2026-09-09',
     })).toEqual({
-      status: 'paused', createdAt: '2026-09-01T00:00:00+00:00', updatedAt: null, startsAt: '2026-09-02T00:00:00+00:00',
-      endsAt: '2026-09-30T00:00:00+00:00', spentKopecks: 1500, totalBudgetKopecks: 100000, dailyBudgetKopecks: null,
+      status: 'paused', createdAt: '2026-09-01T00:00:00+00:00', updatedAt: null,
+      spentKopecks: 1500, totalBudgetKopecks: 100000, dailyBudgetKopecks: null,
       spentTodayKopecks: 0, spentTodayDate: '2026-09-09',
     });
     expect(mapCampaignRow({})).toMatchObject({ status: '', createdAt: null, spentKopecks: 0, totalBudgetKopecks: null });
+  });
+
+  it('reads exactly the columns of AD_CAMPAIGN_SIGNAL_COLUMNS (защита от дрейфа схемы AA: колонка вне явного select никогда не придёт из PostgREST, а несуществующая — даст 400, не тихий null)', () => {
+    const source = readFileSync(fileURLToPath(new URL('./advertiser-signal-service.ts', import.meta.url)), 'utf8');
+    const body = source.slice(source.indexOf('export function mapCampaignRow'), source.indexOf('function isLaunched'));
+    const readColumns = [...new Set([...body.matchAll(/raw\.([a-z_]+)/g)].map((m) => m[1]))].sort();
+    expect(readColumns).toEqual([...AD_CAMPAIGN_SIGNAL_COLUMNS].sort());
+    // Колонки, подтверждённые аукционом (campaign-service.ts читает их в проде), плюс created_at/updated_at.
+    const auctionSelect = readFileSync(fileURLToPath(new URL('./campaign-service.ts', import.meta.url)), 'utf8');
+    for (const col of AD_CAMPAIGN_SIGNAL_COLUMNS) {
+      if (col === 'created_at' || col === 'updated_at') continue;
+      expect(auctionSelect, col).toContain(col);
+    }
   });
 });
 
@@ -58,11 +70,11 @@ describe('computeAdvertiserSignal', () => {
 
   it('lastLaunchedAt: launched statuses or any spend; pending/draft/rejected without spend never launched', () => {
     expect(computeAdvertiserSignal([row({ status: 'pending' }), row({ status: 'draft' }), row({ status: 'rejected' })], [], 0, NOW).lastLaunchedAt).toBeNull();
-    // starts_at приоритетнее updated_at; максимум по запускавшимся.
+    // updated_at приоритетнее created_at; максимум по запускавшимся, pending не в счёт.
     const s = computeAdvertiserSignal([
-      row({ status: 'paused', startsAt: daysAgo(40), updatedAt: daysAgo(1) }),
-      row({ status: 'finished', startsAt: daysAgo(20) }),
-      row({ status: 'pending', startsAt: daysAgo(0) }),
+      row({ status: 'paused', updatedAt: daysAgo(40), createdAt: daysAgo(1) }),
+      row({ status: 'finished', updatedAt: daysAgo(20) }),
+      row({ status: 'pending', updatedAt: daysAgo(0) }),
     ], [], 0, NOW);
     expect(s.lastLaunchedAt).toBe(daysAgo(20));
     // pending со списаниями — крутилась; дата = updated_at, потом created_at.
@@ -82,18 +94,6 @@ describe('computeAdvertiserSignal', () => {
     expect(computeAdvertiserSignal([row({ dailyBudgetKopecks: 500, spentTodayKopecks: 500, spentTodayDate: '2026-09-08' })], [], 0, NOW).budgetExhausted).toBe(false);
     // Незапускавшаяся (pending без списаний) с нулевым бюджетом — не «исчерпан».
     expect(computeAdvertiserSignal([row({ status: 'pending', totalBudgetKopecks: 0 })], [], 0, NOW).budgetExhausted).toBe(false);
-  });
-
-  it('activeEndsAt: soonest future ends_at among ACTIVE campaigns only', () => {
-    const s = computeAdvertiserSignal([
-      row({ status: 'active', endsAt: daysAhead(10) }),
-      row({ status: 'active', endsAt: daysAhead(3) }),
-      row({ status: 'active', endsAt: daysAgo(1) }),
-      row({ status: 'paused', endsAt: daysAhead(1) }),
-      row({ status: 'active', endsAt: null }),
-    ], [], 0, NOW);
-    expect(s.activeEndsAt).toBe(daysAhead(3));
-    expect(computeAdvertiserSignal([row({ status: 'active' })], [], 0, NOW).activeEndsAt).toBeNull();
   });
 
   it('wizardEvents: maps form_start/form_submit_success, drops junk, newest first', () => {
@@ -128,10 +128,10 @@ describe('createAdvertiserSignalService', () => {
 
   it('reads ad_campaigns by advertiser_id and wizard events by form_id within the window, with service-role auth', async () => {
     const fetchMock = mockFetch((url) => url.includes('/ad_campaigns')
-      ? { status: 200, body: [{ status: 'active', spent_kopecks: '300', created_at: daysAgo(2), ends_at: daysAhead(4) }] }
+      ? { status: 200, body: [{ status: 'active', spent_kopecks: '300', created_at: daysAgo(2) }] }
       : { status: 200, body: [{ event_name: 'form_start', created_at: daysAgo(1) }] });
     const s = await createAdvertiserSignalService(cfg).getSignal('u1', { wizardLookbackDays: 14, now: NOW });
-    expect(s).toMatchObject({ statuses: ['active'], hasActive: true, spentKopecks: 300, activeEndsAt: daysAhead(4), wizardWindowDays: 14 });
+    expect(s).toMatchObject({ statuses: ['active'], hasActive: true, spentKopecks: 300, lastLaunchedAt: daysAgo(2), wizardWindowDays: 14 });
     expect(s.wizardEvents).toEqual([{ kind: 'start', at: daysAgo(1) }]);
 
     const calls = fetchMock.mock.calls.map((c) => [String(c[0]), c[1] as RequestInit] as const);
@@ -139,7 +139,8 @@ describe('createAdvertiserSignalService', () => {
     const events = calls.find(([u]) => u.includes('/rest/v1/user_action_events'))!;
     const cq = new URL(campaigns[0]).searchParams;
     expect(cq.get('advertiser_id')).toBe('eq.u1');
-    expect(cq.get('select')).toBe('*');
+    expect(cq.get('select')).toBe(AD_CAMPAIGN_SIGNAL_COLUMNS.join(','));
+    expect(cq.get('select')).not.toContain('*');
     expect(campaigns[1].headers).toEqual({ apikey: 'secret', Authorization: 'Bearer secret' });
     expect(campaigns[1].signal).toBeInstanceOf(AbortSignal);
     const eq = new URL(events[0]).searchParams;

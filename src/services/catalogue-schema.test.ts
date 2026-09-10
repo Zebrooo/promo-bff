@@ -191,7 +191,7 @@ describe('promoSchema — advertiser targeting (ось «Рекламодате�
   const full = {
     campaignStatuses: ['active', 'pending'], hasActiveCampaign: false, everLaunched: true, launchedWithinDays: 90,
     abandonedWizard: true, wizardLookbackDays: 30, paidCampaigns: true, minSpentKopecks: 100000, budgetExhausted: false,
-    endsWithinDays: 7, walletAtMostKopecks: 0,
+    walletAtMostKopecks: 0,
   };
 
   it('keeps every advertiser field through parse (regression class: silently-dropped-field)', () => {
@@ -205,9 +205,15 @@ describe('promoSchema — advertiser targeting (ось «Рекламодате�
     expect(promoSchema.safeParse(makePromo()).success).toBe(true);
   });
 
+  it('strips the retired endsWithinDays key instead of rejecting the promo (старый пул с полем не должен выпасть из parsePoolLeniently)', () => {
+    const result = promoSchema.safeParse(makePromo({ targeting: { advertiser: { ...full, endsWithinDays: 7 } as never } }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.targeting.advertiser).toEqual(full);
+  });
+
   it('rejects out-of-range values and non-slug statuses', () => {
     const bad = [
-      { launchedWithinDays: 0 }, { launchedWithinDays: 366 }, { wizardLookbackDays: 91 }, { endsWithinDays: 0 },
+      { launchedWithinDays: 0 }, { launchedWithinDays: 366 }, { wizardLookbackDays: 91 },
       { minSpentKopecks: -1 }, { walletAtMostKopecks: 1.5 }, { campaignStatuses: ['Active'] }, { campaignStatuses: [''] },
       { campaignStatuses: Array.from({ length: 11 }, (_, i) => `s${i}`) }, { hasActiveCampaign: 'yes' },
     ];

@@ -78,8 +78,6 @@ export interface AdvertiserSignal {
   spentKopecks: number;
   /** Есть запускавшаяся РК с исчерпанным общим или дневным (сегодня, МСК) бюджетом. */
   budgetExhausted: boolean;
-  /** Ближайшая дата окончания (ends_at ≥ now) среди активных РК, ISO; null = нет. */
-  activeEndsAt: string | null;
   /** События мастера подачи (form_id='ad_campaign') за wizardWindowDays, новые первыми. */
   wizardEvents: { kind: 'start' | 'submit'; at: string }[];
   /** Окно, за которое загружены wizardEvents, дней. 0 = не загружали. */

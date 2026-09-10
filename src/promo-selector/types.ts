@@ -149,8 +149,6 @@ export interface PromoTargeting {
     minSpentKopecks?: number;
     /** true = есть РК с исчерпанным общим/дневным бюджетом; false = нет. */
     budgetExhausted?: boolean;
-    /** Есть активная РК с ends_at в ближайшие N дней (1..90). */
-    endsWithinDays?: number;
     /** Баланс рекламного кошелька (ledger_accounts, kind=liability) ≤ N копеек; 0 = пустой. */
     walletAtMostKopecks?: number;
   };
