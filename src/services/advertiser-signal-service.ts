@@ -9,9 +9,12 @@
  * Любой сбой бросает: loadAdvertiserForSelection глотает ошибку, и fail closed
  * остаются только advertiser-таргетированные промо (паттерн behavior-signal).
  *
- * `select=*` у ad_campaigns сознательно (как в campaign-review-service): схему
- * таблицы ведёт витрина, колонка starts_at/ends_at на стенде может называться
- * иначе — маппим защитно, чего нет — null.
+ * Колонки ad_campaigns читаются ЯВНЫМ списком (AD_CAMPAIGN_SIGNAL_COLUMNS), а
+ * не `select=*`: несуществующая колонка тогда даёт PostgREST 400 → сигнал
+ * недоступен → advertiser-промо fail closed С ОШИБКОЙ В ЛОГЕ, а не молчаливый
+ * null в агрегате (так «умерла» ось endsWithinDays: ends_at в таблице не было,
+ * activeEndsAt всегда был null, правило никому не совпадало). Тест сервиса
+ * держит список и маппер в синхроне.
  *
  * In-memory TTL-кэш 60 с по (userId, окно мастера): одна страница даёт до трёх
  * промо-запросов (topline/overlay/tooltip), кэш схлопывает их в одно чтение.
@@ -41,6 +44,22 @@ export const LAUNCHED_STATUSES: ReadonlySet<string> = new Set([
   'active', 'paused', 'completed', 'finished', 'ended', 'stopped',
 ]);
 
+/** Колонки ad_campaigns, которые читает сигнал. Только подтверждённые в
+ *  витрине (auction/campaign-service.ts читает их же для аукциона, плюс
+ *  created_at/updated_at из карточки новой кампании). Добавляешь колонку в
+ *  маппер — добавь сюда, иначе тест сервиса упадёт; нет колонки в AA —
+ *  PostgREST ответит 400, и это видно в логах, а не в тихом null. */
+export const AD_CAMPAIGN_SIGNAL_COLUMNS = [
+  'status',
+  'created_at',
+  'updated_at',
+  'spent_kopecks',
+  'total_budget_kopecks',
+  'daily_budget_kopecks',
+  'spent_today_kopecks',
+  'spent_today_date',
+] as const;
+
 export interface AdvertiserSignalService {
   /** wizardLookbackDays = 0 → события мастера не читаются (wizardEvents: []). */
   getSignal(userId: string, opts: { wizardLookbackDays: number; now: Date }): Promise<AdvertiserSignal>;
@@ -51,8 +70,6 @@ export interface AdvertiserCampaignRow {
   status: string;
   createdAt: string | null;
   updatedAt: string | null;
-  startsAt: string | null;
-  endsAt: string | null;
   spentKopecks: number;
   totalBudgetKopecks: number | null;
   dailyBudgetKopecks: number | null;
@@ -71,7 +88,6 @@ export const EMPTY_ADVERTISER_SIGNAL: AdvertiserSignal = {
   lastLaunchedAt: null,
   spentKopecks: 0,
   budgetExhausted: false,
-  activeEndsAt: null,
   wizardEvents: [],
   wizardWindowDays: 0,
 };
@@ -96,14 +112,13 @@ function iso(v: unknown): string | null {
   return typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : null;
 }
 
-/** Защитный маппинг сырой строки ad_campaigns (select=*). Экспорт для тестов. */
+/** Защитный маппинг строки ad_campaigns (читает ТОЛЬКО AD_CAMPAIGN_SIGNAL_COLUMNS —
+ *  см. тест «маппер и select в синхроне»). Экспорт для тестов. */
 export function mapCampaignRow(raw: Record<string, unknown>): AdvertiserCampaignRow {
   return {
     status: String(raw.status ?? ''),
     createdAt: iso(raw.created_at),
     updatedAt: iso(raw.updated_at),
-    startsAt: iso(raw.starts_at) ?? iso(raw.start_at),
-    endsAt: iso(raw.ends_at) ?? iso(raw.end_at),
     spentKopecks: num(raw.spent_kopecks),
     totalBudgetKopecks: numOrNull(raw.total_budget_kopecks),
     dailyBudgetKopecks: numOrNull(raw.daily_budget_kopecks),
@@ -116,9 +131,10 @@ function isLaunched(row: AdvertiserCampaignRow): boolean {
   return LAUNCHED_STATUSES.has(row.status) || row.spentKopecks > 0;
 }
 
-/** Дата запуска РК: starts_at, иначе updated_at, иначе created_at. */
+/** Дата запуска РК: updated_at (последнее изменение статуса/списание), иначе
+ *  created_at. Отдельной даты запуска у ad_campaigns нет. */
 function launchedAt(row: AdvertiserCampaignRow): string | null {
-  return row.startsAt ?? row.updatedAt ?? row.createdAt;
+  return row.updatedAt ?? row.createdAt;
 }
 
 function isBudgetExhausted(row: AdvertiserCampaignRow, now: Date): boolean {
@@ -139,7 +155,6 @@ export function computeAdvertiserSignal(
   wizardWindowDays: number,
   now: Date,
 ): AdvertiserSignal {
-  const nowMs = now.getTime();
   const statuses = [...new Set(campaigns.map((c) => c.status).filter((s) => s !== ''))];
   const active = campaigns.filter((c) => c.status === 'active');
   const launched = campaigns.filter(isLaunched);
@@ -156,12 +171,6 @@ export function computeAdvertiserSignal(
     ? null
     : Number.isFinite(lastLaunchedMs) ? new Date(lastLaunchedMs).toISOString() : '';
 
-  let activeEndsMs = Infinity;
-  for (const c of active) {
-    const ms = c.endsAt ? Date.parse(c.endsAt) : NaN;
-    if (Number.isFinite(ms) && ms >= nowMs && ms < activeEndsMs) activeEndsMs = ms;
-  }
-
   const events = wizardEvents
     .flatMap((e) => {
       const kind = e.eventName === 'form_start' ? 'start' : e.eventName === 'form_submit_success' ? 'submit' : null;
@@ -176,7 +185,6 @@ export function computeAdvertiserSignal(
     lastLaunchedAt,
     spentKopecks: campaigns.reduce((sum, c) => sum + c.spentKopecks, 0),
     budgetExhausted: launched.some((c) => isBudgetExhausted(c, now)),
-    activeEndsAt: Number.isFinite(activeEndsMs) ? new Date(activeEndsMs).toISOString() : null,
     wizardEvents: events,
     wizardWindowDays,
   };
@@ -202,7 +210,7 @@ export function createAdvertiserSignalService(
   async function fetchCampaigns(userId: string, signal: AbortSignal): Promise<AdvertiserCampaignRow[]> {
     const qs = new URLSearchParams({
       advertiser_id: `eq.${userId}`,
-      select: '*',
+      select: AD_CAMPAIGN_SIGNAL_COLUMNS.join(','),
       order: 'id.desc',
       limit: String(CAMPAIGN_ROW_LIMIT),
     });

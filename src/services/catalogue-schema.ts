@@ -74,7 +74,10 @@ export const listingsTargetingSchema = z.object({
 /** Ось «Рекламодатель» (AdvertiserChecker). Зеркалит advertiserTargetingSchema
  *  кабинета (promo-cabinet/src/lib/schema.ts) без его refine'ов на противоречия:
  *  противоречивое правило здесь просто никому не совпадёт. Статусы — свободные
- *  слаги ad_campaigns.status, чтобы не релизить BFF под каждый новый статус. */
+ *  слаги ad_campaigns.status, чтобы не релизить BFF под каждый новый статус.
+ *  endsWithinDays намеренно нет: у ad_campaigns нет даты окончания (кампания
+ *  живёт до исчерпания бюджета/паузы), поле никому не совпадало бы — см.
+ *  docs/2026-09-09-advertiser-checker.md. Неизвестные ключи z.object режет. */
 export const advertiserTargetingSchema = z.object({
   campaignStatuses: z.array(z.string().trim().min(1).max(32).regex(/^[a-z][a-z0-9_-]*$/)).max(10).optional(),
   hasActiveCampaign: z.boolean().optional(),
@@ -85,7 +88,6 @@ export const advertiserTargetingSchema = z.object({
   paidCampaigns: z.boolean().optional(),
   minSpentKopecks: z.number().int().nonnegative().optional(),
   budgetExhausted: z.boolean().optional(),
-  endsWithinDays: z.number().int().min(1).max(90).optional(),
   walletAtMostKopecks: z.number().int().nonnegative().optional(),
 });
 

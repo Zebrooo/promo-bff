@@ -18,7 +18,6 @@ export function hasAdvertiserRule(promo: Promo): boolean {
     rule.abandonedWizard !== undefined ||
     rule.paidCampaigns !== undefined ||
     rule.budgetExhausted !== undefined ||
-    rule.endsWithinDays !== undefined ||
     rule.walletAtMostKopecks !== undefined
   );
 }
@@ -113,13 +112,6 @@ export class AdvertiserChecker extends Checker {
     }
 
     if (rule.budgetExhausted !== undefined && s.budgetExhausted !== rule.budgetExhausted) return false;
-
-    if (rule.endsWithinDays !== undefined) {
-      if (!isPositiveInt(rule.endsWithinDays)) return false;
-      if (s.activeEndsAt === null) return false;
-      const ms = Date.parse(s.activeEndsAt);
-      if (!Number.isFinite(ms) || ms < nowMs || ms > nowMs + rule.endsWithinDays * DAY_MS) return false;
-    }
 
     if (rule.walletAtMostKopecks !== undefined) {
       // Как у BalanceChecker: сбой чтения баланса — fail closed, отсутствие
