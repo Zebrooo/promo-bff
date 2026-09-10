@@ -223,6 +223,17 @@ describe('promoSchema — advertiser targeting (ось «Рекламодате�
   });
 });
 
+describe('мёртвые popup-поля popupVariant/bullets', () => {
+  it('срезаются, а не отвергаются (старый пул парсится), и в типе Promo их больше нет', () => {
+    const res = promoSchema.safeParse({ ...makePromo({ format: 'popup' }), popupVariant: 'split', bullets: ['a'] } as never);
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data).not.toHaveProperty('popupVariant');
+      expect(res.data).not.toHaveProperty('bullets');
+    }
+  });
+});
+
 describe('purchases/balance targeting (regression: must not be stripped by z.object)', () => {
   // Bug: targeting was a plain z.object({...}) without `purchases`/`balance`
   // keys, so zod's default strip behaviour silently dropped these fields

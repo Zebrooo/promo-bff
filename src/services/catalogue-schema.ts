@@ -193,8 +193,9 @@ export const promoSchema = z.object({
   ctaColor: z.string().optional(),
   ctaTextColor: z.string().optional(),
   textAlign: z.enum(['left', 'center', 'right']).optional(),
-  popupVariant: z.enum(['classic', 'split']).optional(),
-  bullets: z.array(z.string().min(1).max(80)).max(6).optional(),
+  // popupVariant / bullets убраны (2026-09-10): кабинет их не предлагает и
+  // срезает при сохранении, рендерер не читает — в пуле их нет. Старый JSON
+  // с этими ключами всё равно парсится: z.object режет неизвестное.
   /** DivKit-формат: URL на JSON-верстку в S3. abkhaz-auto fetch'ит и
    *  рендерит через @divkitframework/divkit (PromoRenderer 0.6.x). */
   divkitUrl: z.string().url().optional(),
