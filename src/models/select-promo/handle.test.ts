@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleSelectPromo, loadAdvertiserForSelection, loadWalletDataForSelection, type SelectPromoDeps } from './handle';
+import { handleSelectPromo, loadAdvertiserForSelection, loadWalletDataForSelection, stripToAdvertisement, type SelectPromoDeps } from './handle';
 import type { ConfigService } from '../../services/config-service';
 import type { UserService } from '../../services/user-service';
 import type { BillingService } from '../../services/billing-service';
@@ -57,6 +57,18 @@ const deps = (over: Partial<SelectPromoDeps> = {}): SelectPromoDeps => ({
   behaviorSignalService: { getSignal: async () => ({ interests: [], phoneViews7d: 0 }) },
   advertiserSignalService: { getSignal: async (_u, o) => ({ ...EMPTY_ADVERTISER_SIGNAL, wizardWindowDays: o.wizardLookbackDays }) },
   ...over,
+});
+
+describe('stripToAdvertisement', () => {
+  it('вычищает поля пауз — они серверные', () => {
+    const ad = stripToAdvertisement(makePromo({
+      cooldownHours: 5, cooldownSelfMinutes: 60, cooldownPromos: [{ promoId: 'x', minutes: 3 }],
+    }));
+    expect(ad).not.toHaveProperty('cooldownHours');
+    expect(ad).not.toHaveProperty('cooldownSelfMinutes');
+    expect(ad).not.toHaveProperty('cooldownPromos');
+    expect(ad.title).toBe('Test Promo');
+  });
 });
 
 describe('handleSelectPromo', () => {

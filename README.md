@@ -59,9 +59,16 @@ secret is needed. For BFF-first rollout compatibility, requests that omit
 `identityKind` retain the legacy behavior (`authenticated:true` means account,
 otherwise anonymous). Impressions are never TTL-cached: cooldown/frequency reads
 the shared store on every selection, immediately after `/impressions` and across
-BFF instances. A candidate's `cooldownHours` is measured from the viewer's most
-recent impression of any promo id, so changing formats or queues cannot restart
-the window.
+BFF instances.
+
+Cooldowns (since 2026-09): `cooldownSelfMinutes` on promo A pauses every OTHER
+promo of the same format on the same device (`desktop|touch|app`, recorded by
+`POST /impressions { device }`) for N minutes after A was shown; A itself is not
+paused. `cooldownPromos: [{ promoId, minutes }]` on promo B holds B for N
+minutes after each listed promo (self-reference = "do not repeat B more often
+than N minutes"). Legacy `cooldownHours: N > 0` without the new fields reads as
+`cooldownSelfMinutes N×60` plus a self-rule of N×60 (`src/promo-selector/cooldown-rules.ts`).
+Checker names: `cooldown` and `cooldown-promos`; skipping `cooldown` skips both.
 
 ## select-promo logic
 

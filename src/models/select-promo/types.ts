@@ -114,7 +114,7 @@ export function resolveUserIdentity(user?: SelectPromoUser): {
  */
 export type Advertisement = Omit<
   Promo,
-  'name' | 'startsAt' | 'endsAt' | 'schedule' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'audience' | 'sections' | 'categories' | 'sellerStatus' | 'lifecycle' | 'entrySources' | 'afterClickPromoId' | 'suppressAfterClick' | 'leadPhone'
+  'name' | 'startsAt' | 'endsAt' | 'schedule' | 'targeting' | 'maxImpressionsPerUser' | 'cooldownHours' | 'cooldownSelfMinutes' | 'cooldownPromos' | 'audience' | 'sections' | 'categories' | 'sellerStatus' | 'lifecycle' | 'entrySources' | 'afterClickPromoId' | 'suppressAfterClick' | 'leadPhone'
 >;
 
 /**

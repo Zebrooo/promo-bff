@@ -258,7 +258,7 @@ export async function loadAdvertiserForSelection(
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, afterClickPromoId, suppressAfterClick, audience, sections, categories, sellerStatus, lifecycle, entrySources, leadPhone, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, cooldownSelfMinutes, cooldownPromos, afterPromoId, afterClickPromoId, suppressAfterClick, audience, sections, categories, sellerStatus, lifecycle, entrySources, leadPhone, ...ad } = promo;
   return ad;
 }
 
