@@ -186,6 +186,36 @@ describe('handleSelectPromoList', () => {
     expect(inTelegram.status).toBe('ok');
     if (inTelegram.status === 'ok') expect(inTelegram.steps.map((s) => s.id)).toEqual(['any', 'tg']);
   });
+
+  it('общая пауза другого промо того же формата (из пула) блокирует шаг списка на том же устройстве', async () => {
+    const source = makePromo({ id: 'source', format: 'popup', cooldownSelfMinutes: 120 });
+    const candidate = makePromo({ id: 'candidate', format: 'popup' });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [candidate], persist: false, pool: [source, candidate] }),
+    });
+    const impressionStore = {
+      getImpressions: async () => ({
+        counts: { source: 1 },
+        lastShownAt: { source: '2024-06-01T11:00:00.000Z' },
+        lastDevice: { source: 'touch' },
+      }),
+      recordImpression: async () => {},
+    } as ImpressionStore;
+    const now = () => new Date('2024-06-01T12:00:00.000Z');
+
+    const blocked = await handleSelectPromoList(
+      { userId: 'list-pause-same-device', device: 'touch' },
+      deps({ configService, impressionStore, now }),
+    );
+    expect(blocked).toEqual({ status: 'skipped', reason: 'no_promo' });
+
+    const other = await handleSelectPromoList(
+      { userId: 'list-pause-other-device', device: 'desktop' },
+      deps({ configService, impressionStore, now }),
+    );
+    expect(other.status).toBe('ok');
+    if (other.status === 'ok') expect(other.steps.map((s) => s.id)).toEqual(['candidate']);
+  });
 });
 
 describe('IP-geo targeting (WS-2, list)', () => {
