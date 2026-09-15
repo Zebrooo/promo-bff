@@ -6,7 +6,7 @@ import { createTicketAuthenticator } from './auth-ticket';
 import { createConfigService } from './services/config-service';
 import { createUserService } from './services/user-service';
 import { createBillingService } from './services/billing-service';
-import { createImpressionStore } from './services/impression-store';
+import { createImpressionStore, parseImpressionDevice } from './services/impression-store';
 import { createClickStore } from './services/click-store';
 import { createLeadStore, LEADS_DEFAULT_LIMIT, LEADS_MAX_LIMIT, type LeadStore } from './services/lead-store';
 import { createFeedFrequencyService } from './services/feed-frequency-service';
@@ -389,14 +389,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // Records that a user was shown a promo (upserts last-shown timestamp). Same
-  // service-ticket auth as /models. Body: { userId, promoId }.
+  // service-ticket auth as /models. Body: { userId, promoId, device?: desktop|touch|app }.
   app.post('/impressions', async (request, reply) => {
     const auth = await authenticator.authenticate(request);
     if (!auth.authorized) {
       return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
     }
 
-    const body = (request.body ?? {}) as { userId?: unknown; promoId?: unknown; impressionId?: unknown };
+    const body = (request.body ?? {}) as { userId?: unknown; promoId?: unknown; impressionId?: unknown; device?: unknown };
     const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
     const promoId = typeof body.promoId === 'string' ? body.promoId.trim() : '';
     if (!userId || !promoId) {
@@ -404,6 +404,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         .code(400)
         .send({ error: 'bad_request', reason: 'userId and promoId are required non-empty strings' });
     }
+    const device = parseImpressionDevice(body.device);
 
     const campaignId = parseCampaignId(promoId);
     try {
@@ -427,7 +428,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         }
         await chargeService.recordCampaignImpression(campaignId, userId);
       } else {
-        await deps.impressionStore.recordImpression(userId, promoId);
+        await deps.impressionStore.recordImpression(userId, promoId, device);
       }
     } catch (err) {
       app.log.error({ err }, 'POST /impressions: store/charge unavailable');

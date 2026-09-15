@@ -265,6 +265,25 @@ describe('POST /impressions', () => {
     await app.close();
   });
 
+  it('device из тела доезжает до хранилища, мусор становится undefined', async () => {
+    const calls: Array<[string, string, string | undefined]> = [];
+    const app = buildServer({
+      logger: false,
+      deps: {
+        impressionStore: {
+          getImpressions: async () => ({ counts: {}, lastShownAt: {} }),
+          recordImpression: async (userId, promoId, device) => {
+            calls.push([userId, promoId, device]);
+          },
+        },
+      },
+    });
+    expect((await postImp(app, { userId: 'u1', promoId: 'p1', device: 'touch' })).statusCode).toBe(200);
+    expect((await postImp(app, { userId: 'u1', promoId: 'p1', device: 'tv' })).statusCode).toBe(200);
+    expect(calls).toEqual([['u1', 'p1', 'touch'], ['u1', 'p1', undefined]]);
+    await app.close();
+  });
+
   it('applies a recorded impression to the immediately following /models cooldown check', async () => {
     let count = 0;
     let lastShownAt: string | undefined;
@@ -656,7 +675,7 @@ describe('POST /impressions routing (campaign vs house)', () => {
     const app = buildServer({ logger: false, deps });
     const res = await post(app, { userId: 'u1', promoId: 'summer-sale' });
     expect(res.statusCode).toBe(200);
-    expect(recordImpression).toHaveBeenCalledWith('u1', 'summer-sale');
+    expect(recordImpression).toHaveBeenCalledWith('u1', 'summer-sale', undefined);
     expect(recordCampaignImpression).not.toHaveBeenCalled();
     await app.close();
   });
