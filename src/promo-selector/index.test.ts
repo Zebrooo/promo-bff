@@ -50,6 +50,15 @@ describe('selectPromo', () => {
     expect(result?.id).toBe('p');
   });
 
+  it('skip: ["cooldown"] отключает и cooldown-promos (правило на себя)', async () => {
+    __clearUserDataCache();
+    const promos = [makePromo({ id: 'p', cooldownPromos: [{ promoId: 'p', minutes: 180 }] })];
+    const deps = makeDeps({ lastShownAt: { p: '2024-06-01T11:00:00.000Z' } });
+    expect(await selectPromo(promos, ctx, { deps })).toBeNull();
+    const result = await selectPromo(promos, ctx, { deps, skip: ['cooldown'] });
+    expect(result?.id).toBe('p');
+  });
+
   it('skips a desktop-only promo at the queue head and falls through for a touch user', async () => {
     __clearUserDataCache();
     // Head promo is topline (desktop-only format); next is touch-capable inline.
@@ -243,7 +252,7 @@ describe('selectPromo env targeting', () => {
     expect(WEB_CHECKERS.map((c) => c.name)).toEqual([
       'date', 'targeting', 'geo', 'audience', 'visitor', 'source', 'context', 'search', 'purchases', 'balance',
       'interest', 'hot-buyer', 'engagement',
-      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'advertiser', 'limit', 'cooldown', 'reaction', 'chain',
+      'device', 'env', 'format', 'seller', 'lifecycle', 'listings', 'advertiser', 'limit', 'cooldown', 'cooldown-promos', 'reaction', 'chain',
     ]);
   });
 

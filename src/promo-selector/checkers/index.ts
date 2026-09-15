@@ -19,7 +19,7 @@ import { SellerChecker } from './registry/Seller';
 import { LifecycleChecker } from './registry/Lifecycle';
 import { ListingsChecker } from './registry/Listings';
 import { AdvertiserChecker } from './registry/Advertiser';
-import { LimitChecker, CooldownChecker } from './registry/Frequency';
+import { LimitChecker, CooldownSelfChecker, CooldownPromosChecker } from './registry/Frequency';
 import { ReactionChecker } from './registry/Reaction';
 import { ChainChecker } from './registry/Chain';
 
@@ -51,7 +51,8 @@ export const WEB_CHECKERS: Checker<SupplierId>[] = [
   new ListingsChecker(),
   new AdvertiserChecker(),
   new LimitChecker(),
-  new CooldownChecker(),
+  new CooldownSelfChecker(),
+  new CooldownPromosChecker(),
   new ReactionChecker(),
   new ChainChecker(),
 ];
