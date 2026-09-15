@@ -20,6 +20,11 @@ export interface ImpressionData {
   counts: Record<string, number>;
   /** promoId -> ISO-8601 timestamp of this user's most recent view. */
   lastShownAt: Record<string, string>;
+  /** promoId -> устройство последнего показа; заполняется чтением last_device
+   *  (см. recordImpression/getImpressions ниже, задача A4). Undefined пока
+   *  колонка/RPC не подключены — CooldownSelfChecker трактует это как «любое
+   *  устройство совпадает». */
+  lastDevice?: Record<string, string>;
 }
 
 export interface ImpressionStore {

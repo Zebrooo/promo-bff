@@ -35,10 +35,12 @@ export async function handleSelectPromoList(
 
   let promos: Promo[];
   let persist: boolean;
+  let pool: Promo[];
   try {
     const result = await configService.getQueue(queueName);
     promos = result.promos;
     persist = result.persist;
+    pool = result.pool ?? result.promos;
   } catch (err) {
     logger?.error({ err }, 'select-promo-list: config service unavailable');
     return { status: 'error', reason: 'config_service_unavailable' };
@@ -46,7 +48,9 @@ export async function handleSelectPromoList(
 
   // chain always dropped (order = queue index). Persist queues auto-skip limit+cooldown
   // (as select-promo does); on replay the route adds ['limit','cooldown'] via skipCheckers.
+  // cooldown-promos отключается псевдонимом в prepareWalk (skip: ['cooldown'] тянет за собой оба чекера).
   const skip = [...(params.skipCheckers ?? []), 'chain', ...(persist ? ['limit', 'cooldown'] : [])];
+  const poolById: ReadonlyMap<string, Promo> = new Map(pool.map((p) => [p.id, p] as const));
   // Параллельно, как в handleSelectPromo: три опциональные загрузки не должны
   // складываться последовательно внутри бюджета сайта 800 мс.
   const [searchHistory, wallet, behavior, advertiser] = await Promise.all([
@@ -69,6 +73,7 @@ export async function handleSelectPromoList(
         section: params.context?.section,
         category: params.context?.category,
         device: params.device,
+        pool: poolById,
         env: params.env,
         geo: params.geo,
         visit: params.visit,

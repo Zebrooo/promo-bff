@@ -64,8 +64,10 @@ async function fetchQueueObject(queueName: string, logger?: ConfigLogger): Promi
 }
 
 export interface ConfigService {
-  /** Ordered active promos for a named queue + the queue's persist flag. */
-  getQueue(queueName: string): Promise<{ promos: Promo[]; persist: boolean }>;
+  /** Ordered active promos for a named queue + the queue's persist flag.
+   *  `pool` — весь пул для источников общих пауз; тип необязательный только
+   *  ради фейков в тестах, реализация отдаёт его всегда. */
+  getQueue(queueName: string): Promise<{ promos: Promo[]; persist: boolean; pool?: Promo[] }>;
   /** Promo by id straight from the pool, ignoring queues — used by
    *  GET /promo-lead-target, which needs a server-only field of a promo the
    *  site has already shown. Null when the pool has no such id. */
@@ -128,7 +130,7 @@ export function createConfigService(logger?: ConfigLogger): ConfigService {
       );
       const byId = new Map(pool.map((p) => [p.id, p]));
       const promos = queueObj.ids.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => p !== undefined);
-      return { promos, persist: queueObj.persist };
+      return { promos, persist: queueObj.persist, pool };
     },
   };
 }

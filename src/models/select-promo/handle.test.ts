@@ -373,20 +373,38 @@ describe('handleSelectPromo', () => {
     expect(ok.status).toBe('ok');
   });
 
-  it('blocks a candidate after a recent impression of a different promo', async () => {
-    const promo = makePromo({ id: 'next-promo', cooldownHours: 24 });
-    const configService = fakeConfigService({ getQueue: async () => ({ promos: [promo], persist: false }) });
-    const result = await handleSelectPromo({ userId: 'cross-promo-cooldown' }, deps({
-      configService,
-      now: () => new Date('2024-06-01T12:00:00.000Z'),
-      impressionStore: fakeImpressionStore({
-        getImpressions: async () => ({
-          counts: { 'previous-promo': 1 },
-          lastShownAt: { 'previous-promo': '2024-06-01T11:00:00.000Z' },
-        }),
+  it('общая пауза другого промо того же формата (из пула) блокирует кандидата на том же устройстве', async () => {
+    const source = makePromo({ id: 'source', format: 'popup', cooldownSelfMinutes: 120 });
+    const candidate = makePromo({ id: 'candidate', format: 'popup' });
+    const configService = fakeConfigService({
+      getQueue: async () => ({ promos: [candidate], persist: false, pool: [source, candidate] }),
+    });
+    const impressionStore = fakeImpressionStore({
+      getImpressions: async () => ({
+        counts: { source: 1 },
+        lastShownAt: { source: '2024-06-01T11:00:00.000Z' },
+        lastDevice: { source: 'touch' },
       }),
-    }));
+    });
+    const now = () => new Date('2024-06-01T12:00:00.000Z');
 
+    const blocked = await handleSelectPromo({ userId: 'pause-same-device', device: 'touch' }, deps({ configService, impressionStore, now }));
+    expect(blocked.status).toBe('skipped');
+
+    const other = await handleSelectPromo({ userId: 'pause-other-device', device: 'desktop' }, deps({ configService, impressionStore, now }));
+    expect(other.status).toBe('ok');
+  });
+
+  it('без пула в ответе ConfigService источники ищутся среди промо очереди', async () => {
+    const source = makePromo({ id: 'source', format: 'popup', cooldownSelfMinutes: 120 });
+    const candidate = makePromo({ id: 'candidate', format: 'popup' });
+    const configService = fakeConfigService({ getQueue: async () => ({ promos: [source, candidate], persist: false }) });
+    const impressionStore = fakeImpressionStore({
+      getImpressions: async () => ({ counts: { source: 1, candidate: 0 }, lastShownAt: { source: '2024-06-01T11:00:00.000Z' } }),
+    });
+    const result = await handleSelectPromo({ userId: 'pause-queue-pool', excludeIds: ['source'] }, deps({
+      configService, impressionStore, now: () => new Date('2024-06-01T12:00:00.000Z'),
+    }));
     expect(result.status).toBe('skipped');
   });
 
