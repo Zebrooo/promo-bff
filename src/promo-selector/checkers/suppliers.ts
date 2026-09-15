@@ -93,6 +93,7 @@ async function loadUserData(userId: string, identityKind: IdentityKind, deps: Su
     ...account,
     impressionCounts: impressions.counts,
     lastShownAt: impressions.lastShownAt,
+    lastDevice: impressions.lastDevice,
     clickCounts: clicks.counts,
   };
 }

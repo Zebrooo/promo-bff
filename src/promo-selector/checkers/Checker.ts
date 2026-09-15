@@ -27,6 +27,9 @@ export interface CheckContext {
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
   device?: 'desktop' | 'touch' | 'app';
+  /** Пул целиком по id — источники общих пауз (CooldownSelfChecker) ищутся в
+   *  нём по promoId из истории показов. Undefined = чекер пропускается. */
+  pool?: ReadonlyMap<string, Promo>;
   /** Env-сигнал (ОС/среда/класс устройства), вычисленный сайтом. Undefined = сигнала нет:
    *  промо с env-правилами тогда фейлится (fail-closed в EnvChecker), без правил — не затронуто. */
   env?: PromoEnvSignal;
@@ -119,6 +122,9 @@ export interface UserData {
   subscriptionLevel: SubscriptionLevel;
   impressionCounts: Record<string, number>;
   lastShownAt: Record<string, string>;
+  /** promoId -> устройство последнего показа (desktop|touch|app). Строк без
+   *  устройства здесь нет: такой показ совпадает с любым устройством. */
+  lastDevice?: Record<string, string>;
   /** promoId -> суммарные клики этого пользователя (cta + conversion).
    *  Fail-soft: сбой чтения promo_clicks даёт {} (см. suppliers.loadUserData). */
   clickCounts: Record<string, number>;

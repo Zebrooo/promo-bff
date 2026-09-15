@@ -182,6 +182,13 @@ export interface PromoSchedule {
   hourEnd: number;
 }
 
+/** Направленная пауза: это промо не показывается `minutes` минут после показа
+ *  `promoId`. Ссылка на себя допустима и означает «не повторять чаще N минут». */
+export interface CooldownPromoRule {
+  promoId: string;
+  minutes: number;
+}
+
 /**
  * A promo as stored in the S3 pool (promos.json). Queue membership/order lives in
  * queue-<name>.json, not by position here; a promo carries its own targeting, show window
@@ -198,8 +205,16 @@ export interface Promo {
   targeting: PromoTargeting;
   /** Max times one user may see this promo. Omitted = unlimited (limit checker skipped). */
   maxImpressionsPerUser?: number;
-  /** Minimum hours since this user's latest impression of any promo. 0 = disabled. */
-  cooldownHours: number;
+  /** УСТАРЕВШЕЕ (до 09.2026). Читается только когда нет ни cooldownSelfMinutes,
+   *  ни cooldownPromos — см. resolveCooldownRules: N > 0 = пауза формата N×60
+   *  минут плюс правило «не повторять себя» N×60 минут. */
+  cooldownHours?: number;
+  /** Общая пауза формата: после засчитанного показа этого промо ДРУГИЕ промо
+   *  того же формата на том же устройстве не проходят N минут. Само промо под
+   *  свою паузу не попадает. 0/нет = паузы нет. */
+  cooldownSelfMinutes?: number;
+  /** Направленные паузы (CooldownPromoRule). Пустой список = правил нет. */
+  cooldownPromos?: CooldownPromoRule[];
   /** Chain: id of the predecessor promo. When set, this promo is eligible only
    *  after the user has at least one recorded impression of that predecessor
    *  (см. ChainChecker). Omitted = no chaining. */

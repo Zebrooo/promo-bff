@@ -1,13 +1,26 @@
 /**
  * Per-user impression store backed by Supabase (PostgREST). Owns the single
  * source of truth for frequency: how many times a user has seen each promo
- * (count, drives the optional limit checker) and when they last saw it
- * (last_shown_at, drives the cooldown checker).
+ * (count, drives the optional limit checker), when they last saw it
+ * (last_shown_at, drives the cooldown checkers) and on what device
+ * (last_device, drives CooldownSelfChecker's same-device match).
  *
  * Table: public.promo_impressions(user_id text, promo_id text, count int,
- *        last_shown_at timestamptz, primary key (user_id, promo_id)).
- * Writes go through the atomic RPC record_promo_impression(p_user_id, p_promo_id)
- * which does `count = count + 1, last_shown_at = now()` in one statement.
+ *        last_shown_at timestamptz, last_device text, primary key (user_id, promo_id)).
+ * Writes go through the atomic RPC record_promo_impression(p_user_id, p_promo_id, p_device),
+ * still `count = count + 1, last_shown_at = now()` plus (site-side migration, abkhaz-auto)
+ * remembering last_device when p_device is given. `p_device` is the RPC's third,
+ * optional parameter — a call without it (older callers, tests) stays a plain
+ * two-argument call and must not clobber a previously recorded device.
+ *
+ * Окно обратного порядка выката (спека §8: штатный порядок — сначала миграция
+ * сайта, потом этот релиз). Если BFF всё же поднимется раньше — обе стороны
+ * это переживают. Чтение идёт через `select=*`, поэтому отсутствие колонки
+ * last_device на немигрированной таблице не роняет запрос: PostgREST просто
+ * не возвращает такое поле, и оно остаётся отсутствующим ключом — тот же
+ * смысл, что и `last_device: null` (см. `if (row.last_device)` ниже). Запись
+ * отправляет `p_device` только когда его передал сайт, поэтому вызов RPC
+ * остаётся двухаргументным, пока миграция не добавит третий параметр.
  *
  * When Supabase is not configured (empty url/key) this degrades to a no-op store
  * so local/dev and unit tests run without a backend.
@@ -15,23 +28,34 @@
 import { config, type SupabaseConfig } from '../config';
 import { withTimeout } from '../util/with-timeout';
 
+export type ImpressionDevice = 'desktop' | 'touch' | 'app';
+const IMPRESSION_DEVICES: ReadonlySet<string> = new Set(['desktop', 'touch', 'app']);
+
+/** Три класса устройства сайта (те же, что params.device select-promo); всё иное — undefined. */
+export function parseImpressionDevice(value: unknown): ImpressionDevice | undefined {
+  return typeof value === 'string' && IMPRESSION_DEVICES.has(value) ? (value as ImpressionDevice) : undefined;
+}
+
 export interface ImpressionData {
   /** promoId -> times seen by this user. */
   counts: Record<string, number>;
   /** promoId -> ISO-8601 timestamp of this user's most recent view. */
   lastShownAt: Record<string, string>;
+  /** promoId -> устройство последнего показа; строки без last_device отсутствуют. */
+  lastDevice?: Record<string, string>;
 }
 
 export interface ImpressionStore {
   getImpressions(userId: string): Promise<ImpressionData>;
-  /** Atomically increment count and bump last_shown_at to "now". */
-  recordImpression(userId: string, promoId: string): Promise<void>;
+  /** Atomically increment count, bump last_shown_at and remember the device. */
+  recordImpression(userId: string, promoId: string, device?: ImpressionDevice): Promise<void>;
 }
 
 interface ImpressionRow {
   promo_id: string;
   count: number | null;
   last_shown_at: string | null;
+  last_device?: string | null;
 }
 
 function authHeaders(key: string): Record<string, string> {
@@ -54,24 +78,31 @@ export function createImpressionStore(cfg: SupabaseConfig = config.supabase): Im
   const rpc = `${url}/rest/v1/rpc/record_promo_impression`;
 
   async function getImpressions(userId: string): Promise<ImpressionData> {
-    const qs = `user_id=eq.${encodeURIComponent(userId)}&select=promo_id,count,last_shown_at`;
+    // select=* (version-agnostic): a pre-migration table simply has no
+    // last_device column and PostgREST omits it from every row, which the
+    // `if (row.last_device)` guard below already treats as "no device".
+    const qs = `user_id=eq.${encodeURIComponent(userId)}&select=*`;
     const res = await fetch(`${table}?${qs}`, { headers: authHeaders(serviceRoleKey) });
     if (!res.ok) throw new Error(`impression-store read failed: HTTP ${res.status}`);
     const rows = (await res.json()) as ImpressionRow[];
     const counts: Record<string, number> = {};
     const lastShownAt: Record<string, string> = {};
+    const lastDevice: Record<string, string> = {};
     for (const row of rows) {
       if (typeof row.count === 'number') counts[row.promo_id] = row.count;
       if (row.last_shown_at) lastShownAt[row.promo_id] = row.last_shown_at;
+      if (row.last_device) lastDevice[row.promo_id] = row.last_device;
     }
-    return { counts, lastShownAt };
+    return { counts, lastShownAt, lastDevice };
   }
 
-  async function recordImpression(userId: string, promoId: string): Promise<void> {
+  async function recordImpression(userId: string, promoId: string, device?: ImpressionDevice): Promise<void> {
     const res = await fetch(rpc, {
       method: 'POST',
       headers: { ...authHeaders(serviceRoleKey), 'content-type': 'application/json' },
-      body: JSON.stringify({ p_user_id: userId, p_promo_id: promoId }),
+      // Без устройства вызов остаётся двухаргументным — миграция сайта с
+      // default для p_device (третий параметр RPC) закрывает окно выката.
+      body: JSON.stringify({ p_user_id: userId, p_promo_id: promoId, ...(device ? { p_device: device } : {}) }),
     });
     if (!res.ok) throw new Error(`impression-store write failed: HTTP ${res.status}`);
   }
@@ -79,7 +110,7 @@ export function createImpressionStore(cfg: SupabaseConfig = config.supabase): Im
   return {
     getImpressions: (userId) =>
       withTimeout(getImpressions(userId), timeoutMs, 'impressionStore.getImpressions'),
-    recordImpression: (userId, promoId) =>
-      withTimeout(recordImpression(userId, promoId), timeoutMs, 'impressionStore.recordImpression'),
+    recordImpression: (userId, promoId, device) =>
+      withTimeout(recordImpression(userId, promoId, device), timeoutMs, 'impressionStore.recordImpression'),
   };
 }

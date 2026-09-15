@@ -72,26 +72,27 @@ describe('configService.getQueue', () => {
 
   it('returns empty promos and persist:false when the queue object does not exist', async () => {
     const result = await createConfigService().getQueue('home');
-    expect(result).toEqual({ promos: [], persist: false });
+    expect(result).toEqual({ promos: [], persist: false, pool: [] });
   });
 
   it('warns "queue object missing in S3" for a missing queue object (≠ empty queue)', async () => {
     // Incident 2026-05-31: a missing queue-<name>.json looked exactly like an
     // empty queue in the logs. The response stays the same; the log must differ.
-    putPool([makePromo({ id: 'a' })]);
+    const pool = [makePromo({ id: 'a' })];
+    putPool(pool);
     const warns: { obj: unknown; msg?: string }[] = [];
     const logger = { warn: (obj: unknown, msg?: string) => warns.push({ obj, msg }) };
     const svc = createConfigService(logger);
 
     const missing = await svc.getQueue('home');
-    expect(missing).toEqual({ promos: [], persist: false });
+    expect(missing).toEqual({ promos: [], persist: false, pool });
     expect(warns).toEqual([{ obj: { queue: 'home' }, msg: 'queue object missing in S3' }]);
 
     // An EMPTY queue object (ids: []) is a legitimate state — no warn.
     warns.length = 0;
     putQueue('news', { persist: false, ids: [] });
     const empty = await svc.getQueue('news');
-    expect(empty).toEqual({ promos: [], persist: false });
+    expect(empty).toEqual({ promos: [], persist: false, pool });
     expect(warns).toEqual([]);
   });
 
@@ -112,6 +113,14 @@ describe('configService.getQueue', () => {
       .commandCalls(GetObjectCommand)
       .filter((c) => c.args[0].input.Key === promosKey());
     expect(poolGets.length).toBe(1);
+  });
+
+  it('отдаёт весь пул рядом с очередью — источники общих пауз могут стоять в других очередях', async () => {
+    putPool([makePromo({ id: 'a' }), makePromo({ id: 'b' })]);
+    putQueue('home', { ids: ['a'] });
+    const result = await createConfigService().getQueue('home');
+    expect(result.promos.map((p) => p.id)).toEqual(['a']);
+    expect(result.pool?.map((p) => p.id)).toEqual(['a', 'b']);
   });
 
   it('drops a single invalid pool record, keeps the valid ones, and warns', async () => {

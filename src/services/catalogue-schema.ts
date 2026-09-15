@@ -140,6 +140,16 @@ export const lifecycleTargetingSchema = z.object({
     message: 'пустой lifecycle не имеет смысла — задайте хотя бы одно условие',
   });
 
+/** Год в минутах — верхняя граница любой паузы. Зеркало схемы кабинета. */
+export const COOLDOWN_MAX_MINUTES = 525_600;
+/** Направленных правил у одного промо. Зеркало схемы кабинета. */
+export const COOLDOWN_PROMOS_MAX = 20;
+
+const cooldownPromoRuleSchema = z.object({
+  promoId: z.string().min(1).max(64),
+  minutes: z.number().int().min(1).max(COOLDOWN_MAX_MINUTES),
+});
+
 /** Validation source of truth for a promo (mirrored by the cabinet). */
 export const promoSchema = z.object({
   id: z.string().min(1),
@@ -154,7 +164,12 @@ export const promoSchema = z.object({
     (v) => (v === 0 ? undefined : v),
     z.number().int().positive().optional(),
   ),
-  cooldownHours: z.number().int().nonnegative(),
+  /** УСТАРЕВШЕЕ: читается только без новых полей (resolveCooldownRules). */
+  cooldownHours: z.number().int().nonnegative().optional(),
+  /** Общая пауза формата после показа этого промо, минут. Mirrors the cabinet schema. */
+  cooldownSelfMinutes: z.number().int().min(0).max(COOLDOWN_MAX_MINUTES).optional(),
+  /** Направленные паузы; ссылка на себя допустима. Mirrors the cabinet schema. */
+  cooldownPromos: z.array(cooldownPromoRuleSchema).max(COOLDOWN_PROMOS_MAX).optional(),
   /** Chain: id of the predecessor promo — this promo shows only after the user
    *  has a recorded impression of it (ChainChecker). Mirrors the cabinet schema. */
   afterPromoId: z.string().min(1).max(64).optional(),
@@ -262,6 +277,15 @@ export const promoSchema = z.object({
   .refine((p) => p.afterListings === undefined || p.format === 'promoline', {
     message: 'afterListings is only supported by the promoline format',
     path: ['afterListings'],
+  })
+  // Два правила на один promoId — двусмысленность (какое окно считать?);
+  // кабинет отвергает то же самое.
+  .refine((p) => {
+    const ids = (p.cooldownPromos ?? []).map((r) => r.promoId);
+    return new Set(ids).size === ids.length;
+  }, {
+    message: 'cooldownPromos must not repeat a promoId',
+    path: ['cooldownPromos'],
   });
 
 // Pool schema; exported as `poolSchema` below. (`catalogueSchema` name kept for existing callers.)

@@ -59,6 +59,8 @@ export interface SelectPromoContext {
   category?: string;
   /** Requesting device; gates promos by deviceTarget. Undefined = no device filter. */
   device?: 'desktop' | 'touch' | 'app';
+  /** Пул целиком — источники общих пауз; handler строит из ConfigService. */
+  pool?: ReadonlyMap<string, Promo>;
   /** Env-сигнал (ОС/среда/класс устройства); undefined = сигнала нет (EnvChecker fail-closed). */
   env?: PromoEnvSignal;
   /** Viewer IP-geo, разрезолвленный сайтом. Undefined = сигнала нет (GeoChecker fail-closed для гео-промо). */
@@ -108,8 +110,12 @@ export interface SelectPromoOptions {
  *  Both selectPromo and selectPromoList build on this so their setup can't drift. */
 async function prepareWalk(promos: Promo[], ctx: SelectPromoContext, opts: SelectPromoOptions) {
   const checkers = opts.checkers ?? WEB_CHECKERS;
-  const skip = opts.skip ?? [];
-  const active = checkers.filter((c) => !skip.includes(c.name));
+  const skip = new Set(opts.skip ?? []);
+  // «cooldown» в skip исторически значит «без частотных пауз вообще»:
+  // persist-очереди, replay тура и старые потребители не знают про
+  // cooldown-promos, и без псевдонима правило на себя блокировало бы replay.
+  if (skip.has('cooldown')) skip.add('cooldown-promos');
+  const active = checkers.filter((c) => !skip.has(c.name));
   // Consumer-supplied exclusion (session-seen list) applies BEFORE the checker
   // walk, so an excluded promo can't win even when it passes every checker.
   const excludeIds = ctx.excludeIds ?? [];
@@ -155,6 +161,7 @@ async function evaluateCandidate(
     section: ctx.section,
     category: ctx.category,
     device: ctx.device,
+    pool: ctx.pool,
     env: ctx.env,
     geoSegment: ctx.geo?.segment,
     geoCity: ctx.geo?.city,

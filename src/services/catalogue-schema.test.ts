@@ -185,6 +185,28 @@ describe('promoSchema', () => {
     const promo = makePromo({ targeting: { listings: { inactiveDays: -1 } } });
     expect(promoSchema.safeParse(promo).success).toBe(false);
   });
+
+  it('cooldownHours стало необязательным — промо без него парсится', () => {
+    const { cooldownHours: _dropped, ...rest } = makePromo();
+    void _dropped;
+    expect(() => promoSchema.parse(rest)).not.toThrow();
+  });
+
+  it('принимает новые поля пауз в границах', () => {
+    expect(() => promoSchema.parse(makePromo({
+      cooldownSelfMinutes: 0,
+      cooldownPromos: [{ promoId: 'promo-1', minutes: 3 }, { promoId: 'other', minutes: 525_600 }],
+    }))).not.toThrow();
+  });
+
+  it('отвергает дробные и внеграничные минуты и дубликаты promoId', () => {
+    expect(() => promoSchema.parse(makePromo({ cooldownSelfMinutes: 1.5 }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ cooldownSelfMinutes: 525_601 }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({ cooldownPromos: [{ promoId: 'a', minutes: 0 }] }))).toThrow();
+    expect(() => promoSchema.parse(makePromo({
+      cooldownPromos: [{ promoId: 'a', minutes: 1 }, { promoId: 'a', minutes: 2 }],
+    }))).toThrow(/must not repeat/);
+  });
 });
 
 describe('promoSchema — advertiser targeting (ось «Рекламодатель», зеркало кабинета)', () => {

@@ -258,7 +258,7 @@ export async function loadAdvertiserForSelection(
  * can't drift from the Advertisement Omit.
  */
 export function stripToAdvertisement(promo: Promo): Advertisement {
-  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, afterPromoId, afterClickPromoId, suppressAfterClick, audience, sections, categories, sellerStatus, lifecycle, entrySources, leadPhone, ...ad } = promo;
+  const { name, startsAt, endsAt, schedule, targeting, maxImpressionsPerUser, cooldownHours, cooldownSelfMinutes, cooldownPromos, afterPromoId, afterClickPromoId, suppressAfterClick, audience, sections, categories, sellerStatus, lifecycle, entrySources, leadPhone, ...ad } = promo;
   return ad;
 }
 
@@ -289,6 +289,17 @@ export function recordTraceObservability(
 }
 
 /**
+ * Пул по id для источников общих пауз (CooldownSelfChecker). Общий для
+ * handleSelectPromo + handleSelectPromoList, чтобы проводка пула не разъехалась —
+ * тот же приём, что stripToAdvertisement и recordTraceObservability. `pool`
+ * в ответе ConfigService необязателен только в типе (фейки тестов); без него
+ * источники ищутся среди промо самой очереди.
+ */
+export function poolByIdFrom(result: { promos: Promo[]; pool?: Promo[] }): ReadonlyMap<string, Promo> {
+  return new Map((result.pool ?? result.promos).map((p) => [p.id, p] as const));
+}
+
+/**
  * select-promo model: resolve the queue from S3, build the per-request context,
  * and run the checker chain. The checkers pull user data via the userData
  * supplier; this handler no longer fetches profile/impressions itself.
@@ -305,15 +316,18 @@ export async function handleSelectPromo(
 
   let promos: Promo[];
   let persist: boolean;
+  let poolById: ReadonlyMap<string, Promo>;
   try {
     const result = await configService.getQueue(queueName);
     promos = result.promos;
     persist = result.persist;
+    poolById = poolByIdFrom(result);
   } catch (err) {
     logger?.error({ err }, 'select-promo: config service unavailable');
     return { status: 'error', reason: 'config_service_unavailable' };
   }
 
+  // cooldown-promos отключается псевдонимом в prepareWalk (skip: ['cooldown'] тянет за собой оба чекера).
   const skip = [...(params.skipCheckers ?? []), ...(persist ? ['limit', 'cooldown'] : [])];
   // Четыре опциональные загрузки — параллельно: последовательно худший случай
   // был бы 4×300 мс и не влез бы в бюджет сайта 800 мс. Ошибки каждая ловит внутри.
@@ -337,6 +351,7 @@ export async function handleSelectPromo(
         section: params.context?.section,
         category: params.context?.category,
         device: params.device,
+        pool: poolById,
         env: params.env,
         geo: params.geo,
         visit: params.visit,
