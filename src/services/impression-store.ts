@@ -7,10 +7,11 @@
  *
  * Table: public.promo_impressions(user_id text, promo_id text, count int,
  *        last_shown_at timestamptz, last_device text, primary key (user_id, promo_id)).
- * Writes go through the atomic RPC record_promo_impression(p_user_id, p_promo_id, p_device)
- * which does `count = count + 1, last_shown_at = now(), last_device = coalesce(p_device, last_device)`
- * in one statement. `p_device` is the RPC's third, optional parameter — a call
- * without it (older callers, tests) stays a plain two-argument call.
+ * Writes go through the atomic RPC record_promo_impression(p_user_id, p_promo_id, p_device),
+ * still `count = count + 1, last_shown_at = now()` plus (site-side migration, abkhaz-auto)
+ * remembering last_device when p_device is given. `p_device` is the RPC's third,
+ * optional parameter — a call without it (older callers, tests) stays a plain
+ * two-argument call and must not clobber a previously recorded device.
  *
  * When Supabase is not configured (empty url/key) this degrades to a no-op store
  * so local/dev and unit tests run without a backend.
