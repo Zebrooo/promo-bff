@@ -26,7 +26,7 @@ export class CooldownChecker extends Checker<'userData'> {
   readonly requiredSupplierIDs = ['userData'] as const;
   expect() { return 'at least cooldownHours have passed since the latest promo show'; }
   shouldSkip(ctx: CheckContext): false | string {
-    return ctx.promo.cooldownHours <= 0 ? 'no cooldown configured' : false;
+    return (ctx.promo.cooldownHours ?? 0) <= 0 ? 'no cooldown configured' : false;
   }
   check(ctx: CheckContext, data: SuppliersData<'userData'>): boolean {
     let latestLastShownAtMs: number | undefined;
@@ -38,6 +38,6 @@ export class CooldownChecker extends Checker<'userData'> {
       }
     }
     if (latestLastShownAtMs === undefined) return true;
-    return ctx.now.getTime() - latestLastShownAtMs >= ctx.promo.cooldownHours * MS_PER_HOUR;
+    return ctx.now.getTime() - latestLastShownAtMs >= (ctx.promo.cooldownHours ?? 0) * MS_PER_HOUR;
   }
 }
