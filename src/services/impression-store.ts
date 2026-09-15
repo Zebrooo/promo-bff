@@ -13,6 +13,15 @@
  * optional parameter — a call without it (older callers, tests) stays a plain
  * two-argument call and must not clobber a previously recorded device.
  *
+ * Окно обратного порядка выката (спека §8: штатный порядок — сначала миграция
+ * сайта, потом этот релиз). Если BFF всё же поднимется раньше — обе стороны
+ * это переживают. Чтение идёт через `select=*`, поэтому отсутствие колонки
+ * last_device на немигрированной таблице не роняет запрос: PostgREST просто
+ * не возвращает такое поле, и оно остаётся отсутствующим ключом — тот же
+ * смысл, что и `last_device: null` (см. `if (row.last_device)` ниже). Запись
+ * отправляет `p_device` только когда его передал сайт, поэтому вызов RPC
+ * остаётся двухаргументным, пока миграция не добавит третий параметр.
+ *
  * When Supabase is not configured (empty url/key) this degrades to a no-op store
  * so local/dev and unit tests run without a backend.
  */
@@ -69,7 +78,10 @@ export function createImpressionStore(cfg: SupabaseConfig = config.supabase): Im
   const rpc = `${url}/rest/v1/rpc/record_promo_impression`;
 
   async function getImpressions(userId: string): Promise<ImpressionData> {
-    const qs = `user_id=eq.${encodeURIComponent(userId)}&select=promo_id,count,last_shown_at,last_device`;
+    // select=* (version-agnostic): a pre-migration table simply has no
+    // last_device column and PostgREST omits it from every row, which the
+    // `if (row.last_device)` guard below already treats as "no device".
+    const qs = `user_id=eq.${encodeURIComponent(userId)}&select=*`;
     const res = await fetch(`${table}?${qs}`, { headers: authHeaders(serviceRoleKey) });
     if (!res.ok) throw new Error(`impression-store read failed: HTTP ${res.status}`);
     const rows = (await res.json()) as ImpressionRow[];

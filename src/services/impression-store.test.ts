@@ -34,8 +34,22 @@ describe('createImpressionStore (Supabase)', () => {
     expect(data.lastDevice).toEqual({ a: 'touch' });
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toBe(
-      'https://sb.example.com/rest/v1/promo_impressions?user_id=eq.user%201&select=promo_id,count,last_shown_at,last_device',
+      'https://sb.example.com/rest/v1/promo_impressions?user_id=eq.user%201&select=*',
     );
+  });
+
+  it('read path tolerates a pre-migration table with no last_device column at all', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify([{ promo_id: 'a', count: 1, last_shown_at: '2024-06-01T10:00:00.000Z' }]), {
+        status: 200,
+      }),
+    );
+    const store = createImpressionStore(cfg);
+    await expect(store.getImpressions('u1')).resolves.toEqual({
+      counts: { a: 1 },
+      lastShownAt: { a: '2024-06-01T10:00:00.000Z' },
+      lastDevice: {},
+    });
   });
 
   it('records via the atomic RPC with the p_ argument names', async () => {
