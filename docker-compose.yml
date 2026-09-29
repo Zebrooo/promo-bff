@@ -40,6 +40,17 @@ services:
       # AA_SUPABASE_* в .env отсутствуют или пусты.
       PROMO_SUPABASE_URL: "${AA_SUPABASE_URL:?AA_SUPABASE_URL must be set in .env}"
       PROMO_SUPABASE_SERVICE_ROLE_KEY: "${AA_SUPABASE_SERVICE_ROLE_KEY:?AA_SUPABASE_SERVICE_ROLE_KEY must be set in .env}"
+      # Витрина для push-рассылок кабинета: POST {AA_BASE_URL}/api/v1/push/broadcast.
+      # Только публичный домен: Traefik всегда ведёт его на живой цвет витрины.
+      # Имена abkhaz-auto-web-blue / -green сюда нельзя: витрина выкатывается
+      # blue-green, цвета меняются ролями на каждом выкате, и прибитый адрес
+      # через раз попадает в резервную копию с прошлым релизом (29.09.2026 .env
+      # указывал на green, а живым был blue). environment перекрывает .env.
+      # ⚠️ Это значение ПРОДА. Тест-стенд 185 держит свой compose (не git-клон),
+      # и ключ тикетов у стендов общий: скопировав туда этот файл, замените
+      # строку на тестовый домен — иначе тестовый кабинет разошлёт пуш боевым
+      # пользователям.
+      AA_BASE_URL: "https://abkhaz-auto.ru"
     networks:
       # web — общая с витриной: она зовёт http://promo-bff:3191
       - web
