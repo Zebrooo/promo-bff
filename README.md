@@ -244,7 +244,7 @@ FCM-инфраструктура и таблица `device_tokens`. BFF зовё
 
 | env | назначение |
 | --- | --- |
-| `AA_BASE_URL` | публичный base витрины (без trailing `/`), например `https://abkhaz-auto.apsoftgroup.ru`. Пусто = «Отправить» отвечает 503, черновики работают. |
+| `AA_BASE_URL` | публичный base витрины (без trailing `/`); на проде задан в `docker-compose.yml`: `https://abkhaz-auto.ru`. Не имя контейнера `abkhaz-auto-web-blue`/`-green`: они меняются ролями при каждом выкате витрины. Пусто = «Отправить» отвечает 503, черновики работают. |
 | `AA_PUSH_BROADCAST_PATH` | путь ручки рассылки, по умолчанию `/api/v1/push/broadcast`. |
 | `PROMO_TICKET_PRIVATE_KEY` | **приватный** Ed25519-ключ BFF (base64 DER pkcs8) для исходящих тикетов `src=promo-bff` → `dst=abkhaz-auto`. Парный публичный ключ витрина держит у себя для проверки. Не путать с `PROMO_TICKET_PUBLIC_KEY`, которым BFF проверяет входящие тикеты. |
 | `AA_SERVICE_NAME` | `dst` исходящего тикета, по умолчанию `abkhaz-auto`. |
