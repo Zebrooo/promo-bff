@@ -62,6 +62,14 @@ export interface OpenrouterImageConfig {
   timeoutMs: number;
 }
 
+/** Проверка заголовка на готовом баннере (headline-check.ts): дешёвая
+ *  мультимодальная модель читает текст с картинки. */
+export interface HeadlineCheckConfig {
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+}
+
 export interface AiConfig {
   /** Max enhance requests per advertiser per rolling hour. */
   rateLimitPerHour: number;
@@ -97,6 +105,7 @@ export interface AppConfig {
   aaPush: AaPushConfig;
   openrouter: OpenrouterConfig;
   openrouterImage: OpenrouterImageConfig;
+  headlineCheck: HeadlineCheckConfig;
   ai: AiConfig;
 }
 
@@ -253,11 +262,19 @@ export const config: AppConfig = {
     apiKey: process.env.OPENROUTER_API_KEY ?? '',
     // Default = Google "Nano Banana 2" (text+image→image). Override via env.
     imageModel: process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image-preview',
-    // Image-gen models bill per output image; placeholder default. Tune via env.
-    pricePerImageUsd: Number(process.env.OPENROUTER_IMAGE_USD ?? 0.04),
+    // Замер 14.10.2026: 1K-картинка Nano Banana 2 через OpenRouter — 0,069 $
+    // (1120 токенов картинки по 3 $/M плюс промпт). Tune via env.
+    pricePerImageUsd: Number(process.env.OPENROUTER_IMAGE_USD ?? 0.07),
     usdRub: Number(process.env.OPENROUTER_USD_RUB ?? 95),
     // Image gen often takes 20-40s. Give it room.
     timeoutMs: Number(process.env.OPENROUTER_IMAGE_TIMEOUT_MS ?? 60000),
+  },
+  headlineCheck: {
+    apiKey: process.env.OPENROUTER_API_KEY ?? '',
+    // Умолчание выбрано замером (см. headline-check.ts): 2.5-flash-lite не
+    // «исправляет» опечатки при чтении, в отличие от 3.1-flash-lite.
+    model: process.env.OPENROUTER_VISION_MODEL ?? 'google/gemini-2.5-flash-lite',
+    timeoutMs: Number(process.env.OPENROUTER_VISION_TIMEOUT_MS ?? 20000),
   },
   ai: {
     rateLimitPerHour: Number(process.env.AI_RATE_LIMIT_PER_HOUR ?? 30),

@@ -14,10 +14,12 @@ function params(over: Partial<EnhanceBannerImageParams> = {}): EnhanceBannerImag
 }
 
 describe('buildEnhanceBannerImagePrompt', () => {
-  it('заголовок попадает в промпт дословно, в «ёлочках», и повторяется в финальной проверке', () => {
+  it('заголовок попадает в промпт дословно, без кавычек, и повторяется в финальной проверке', () => {
     const prompt = buildEnhanceBannerImagePrompt(params());
-    const occurrences = prompt.split('«Строим дома под ключ»').length - 1;
-    expect(occurrences).toBe(2);
+    // Текст — отдельной строкой без кавычек: «ёлочки» модель рисовала на баннере.
+    expect(prompt).toContain('without adding quotation marks around it:\nСтроим дома под ключ\n');
+    expect(prompt).toContain('the headline reads exactly: Строим дома под ключ — every letter correct');
+    expect(prompt).not.toContain('«Строим дома под ключ»');
   });
 
   it('полоса 8:1: форма названа, кнопка справа → правая четверть зарезервирована, предмет слева', () => {
@@ -77,19 +79,19 @@ describe('buildEnhanceBannerImagePrompt', () => {
 
   it('подзаголовок добавляется второй строкой, без него строки «Below it» нет', () => {
     const withSub = buildEnhanceBannerImagePrompt(params({ draft: { title: 'Заголовок', description: 'Подзаголовок' } }));
-    expect(withSub).toContain('Below it, smaller and lighter, exactly this text:\n«Подзаголовок»');
+    expect(withSub).toContain('Below it, smaller and lighter, exactly the text on the next line:\nПодзаголовок\n');
     expect(buildEnhanceBannerImagePrompt(params())).not.toContain('Below it');
   });
 
   it('только описание без заголовка — оно и становится главным текстом', () => {
     const prompt = buildEnhanceBannerImagePrompt(params({ draft: { description: 'Только описание' } }));
-    expect(prompt).toContain('«Только описание»');
+    expect(prompt).toContain('around it:\nТолько описание\n');
     expect(prompt).not.toContain('Below it');
   });
 
   it('прямые кавычки в заголовке становятся «ёлочками», пробелы схлопываются', () => {
     const prompt = buildEnhanceBannerImagePrompt(params({ draft: { title: '  Зоомагазин  "Кошкин Дом"\n— всё для питомцев ' } }));
-    expect(prompt).toContain('«Зоомагазин «Кошкин Дом» — всё для питомцев»');
+    expect(prompt).toContain('around it:\nЗоомагазин «Кошкин Дом» — всё для питомцев\n');
   });
 
   it('actionLabel на картинку не попадает — кнопку рисует витрина', () => {
@@ -101,6 +103,8 @@ describe('buildEnhanceBannerImagePrompt', () => {
     const prompt = buildEnhanceBannerImagePrompt(params({ ctaPosition: 'br' }));
     expect(prompt).not.toMatch(/frosted|glass|rectangle|bokeh/i);
     expect(prompt).not.toContain('top-left corner');
+    // «Здесь сайт поставит кнопку» модель воплощала белой плашкой в зоне.
+    expect(prompt).not.toMatch(/button|pill|panel/i);
   });
 });
 
@@ -112,5 +116,13 @@ describe('cleanBannerText', () => {
 
   it('непарная кавычка просто убирается', () => {
     expect(cleanBannerText('Дом "у моря')).toBe('Дом у моря');
+  });
+});
+
+describe('buildEnhanceBannerImagePrompt — кегль полосы', () => {
+  it('у полосы 8:1 кегль 35–45 %, у телефонной 4,83:1 — 22–30 %', () => {
+    expect(buildEnhanceBannerImagePrompt(params({ width: 2400, height: 300 }))).toContain('cap height about 35–45 %');
+    expect(buildEnhanceBannerImagePrompt(params({ width: 1160, height: 240 }))).toContain('cap height about 22–30 %');
+    expect(buildEnhanceBannerImagePrompt(params({ width: 1160, height: 240 }))).toContain('Left quarter: the subject');
   });
 });

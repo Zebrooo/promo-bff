@@ -1,7 +1,7 @@
 /**
  * Промпт для /enhance-banner-image: из фото рекламодателя + заголовка сделать
  * готовый баннер. Что здесь учтено и почему — по следам разбора 14.10.2026
- * (образцы с тест-стенда):
+ * (образцы с тест-стенда и три прогона A/B на нём же):
  *
  *   - Рекламодатели грузят не баннеры, а обычные фото (стройка, фасад
  *     магазина, товар на столе). Поэтому референс описан как «фото предмета
@@ -9,11 +9,15 @@
  *     предмет и собирает раскладку заново, а не дорисовывает текст поверх.
  *   - Прежний промпт требовал «только фон в углах» с длинным списком «никаких
  *     панелей, стёкол, прямоугольников» — и модель рисовала в углах ровно
- *     такие светлые прямоугольники. Теперь зона кнопки описана положительно,
- *     как часть раскладки, и слова «панель/прямоугольник» в промпте нет.
- *   - Текст страдал: «со скидкой» → «сожий», заголовок перефразировался. Текст
- *     вынесен на отдельную строку в «ёлочках», размер и число строк заданы от
- *     длины, в конце — просьба сверить написание (модель умеет думать).
+ *     такие светлые прямоугольники. А фраза «здесь сайт поставит кнопку»
+ *     давала в зоне белую плашку-кнопку. Теперь зона описана как часть
+ *     раскладки, без объяснения зачем, и слов «кнопка/панель/прямоугольник»
+ *     в промпте нет вовсе.
+ *   - Текст страдал: «со скидкой» → «сожий», заголовок перефразировался,
+ *     «ёлочки» вокруг текста модель рисовала на баннере, слово на переносе
+ *     строки удваивалось. Текст идёт отдельной строкой без кавычек, число
+ *     строк и кегль заданы от длины, в конце — просьба сверить написание.
+ *     Остаточные опечатки ловит сверка в пайплайне (headline-check.ts).
  *   - Форму кадра задаёт `image_config.aspect_ratio` (см. pipeline), а промпт
  *     её только повторяет словами и задаёт запас по краям под cover-кроп
  *     телефонной полосы (4:1 → 4,83:1).
@@ -38,7 +42,7 @@ const OPPOSITE_SIDE: Record<Side, Side> = { left: 'right', right: 'left' };
 const OPPOSITE_VERTICAL: Record<Vertical, Vertical> = { top: 'bottom', bottom: 'top' };
 
 /** Текст в промпт: схлопнуть пробелы, прямые кавычки → «ёлочки», чтобы
- *  внутренние кавычки заголовка не спорили с обрамляющими. */
+ *  внутренние кавычки заголовка не читались как разметка. */
 export function cleanBannerText(raw: string | undefined): string {
   if (!raw) return '';
   return raw
@@ -46,6 +50,12 @@ export function cleanBannerText(raw: string | undefined): string {
     .trim()
     .replace(/"([^"]*)"/g, '«$1»')
     .replace(/"/g, '');
+}
+
+/** Главный текст баннера — заголовок, без него описание. Его же пайплайн
+ *  сверяет с готовой картинкой (expectedText). */
+export function bannerHeadlineText(draft: EnhanceBannerImageParams['draft']): string {
+  return cleanBannerText(draft.title) || cleanBannerText(draft.description);
 }
 
 function lineAdvice(length: number, shape: ReturnType<typeof bannerShape>): string {
@@ -70,6 +80,12 @@ function shapeLine(width: number, height: number, aspect: string): string {
   return `a vertical poster, aspect ratio ${aspect} (${width}×${height} px, taller than wide)`;
 }
 
+/** Зона кнопки витрины — без объяснения, зачем она пуста: объяснение
+ *  («здесь будет кнопка») модель воплощала плашкой. */
+function reservedLine(zone: string): string {
+  return `- ${capitalize(zone)}: RESERVED — plain continuous background only; it looks exactly like the background beside it, with nothing placed in it, not even the end of a headline line.`;
+}
+
 interface Layout {
   heading: string;
   lines: string[];
@@ -85,12 +101,17 @@ function layoutFor(params: EnhanceBannerImageParams, lines: string): Layout {
 
   if (shape === 'strip') {
     const reserved = `${near} 25 % of the width`;
+    // Короткой полосе (4:1) две строки крупного кегля не влезают — текст
+    // расползался в зону кнопки; предмет уже, кегль ниже.
+    const long = params.width / params.height >= 6;
+    const subjectZone = long ? 'third' : 'quarter';
+    const capHeight = long ? '35–45 %' : '22–30 %';
     return {
       heading: 'LAYOUT — a wide strip, read left to right in three zones',
       lines: [
-        `- ${capitalize(far)} third: the subject, large, filling the full height (it may run off the ${far} edge).`,
-        `- Middle: the headline on the plain background, ${lines}; cap height about 35–45 % of the strip height.`,
-        `- ${capitalize(reserved)}: RESERVED — plain background only, nothing drawn there; the website places its button in that area.`,
+        `- ${capitalize(far)} ${subjectZone}: the subject, large, filling the full height (it may run off the ${far} edge).`,
+        `- Middle: the headline on the plain background, ${lines}; cap height about ${capHeight} of the strip height. If it does not fit, make it smaller — it never crosses into the reserved zone.`,
+        reservedLine(reserved),
       ],
       reserved,
     };
@@ -103,7 +124,7 @@ function layoutFor(params: EnhanceBannerImageParams, lines: string): Layout {
       lines: [
         `- ${capitalize(far)} half: the subject, large.`,
         `- ${capitalize(near)} half, ${OPPOSITE_VERTICAL[corner.vertical]} part: the headline, ${lines}, aligned ${far}.`,
-        `- ${capitalize(reserved)}: RESERVED — plain background only, nothing drawn there; the website places its title pill and button in that area.`,
+        reservedLine(reserved),
       ],
       reserved,
     };
@@ -117,7 +138,7 @@ function layoutFor(params: EnhanceBannerImageParams, lines: string): Layout {
     lines: [
       `- ${capitalize(headlineBand)} part (about 25 % of the height): the headline, ${lines}, spanning up to 80 % of the width, aligned left.`,
       '- Middle: the subject, large and centred.',
-      `- ${capitalize(reserved)}: RESERVED — plain background only, nothing drawn there; the website places its title pill and button in that area.`,
+      reservedLine(reserved),
     ],
     reserved,
   };
@@ -132,9 +153,8 @@ export function buildEnhanceBannerImagePrompt(params: EnhanceBannerImageParams):
   const aspect = pickAspectRatio(width, height);
   const shape = bannerShape(width, height);
   const title = cleanBannerText(params.draft.title);
-  const description = cleanBannerText(params.draft.description);
-  const primary = title || description;
-  const secondary = title ? description : '';
+  const primary = bannerHeadlineText(params.draft);
+  const secondary = title ? cleanBannerText(params.draft.description) : '';
   const layout = layoutFor(params, lineAdvice(primary.length, shape));
 
   const lines: string[] = [];
@@ -144,11 +164,11 @@ export function buildEnhanceBannerImagePrompt(params: EnhanceBannerImageParams):
   lines.push("The attached image is the advertiser's own photo or current banner. It shows WHAT is advertised. Keep that subject recognisable — the same product, vehicle, building, goods or place, with its real colours, and any logo or brand mark exactly as it appears. Everything else is yours to redesign: lift the subject out of cluttered surroundings or re-stage it, rebuild the layout, choose the background and lighting. Do not carry over the reference's old text, watermarks, noise or blur.");
   lines.push('');
   lines.push('HEADLINE — the only text in the image');
-  lines.push('Render exactly this Russian text, letter for letter, in correct Cyrillic spelling, keeping its punctuation and capitalisation:');
-  lines.push(`«${primary}»`);
+  lines.push('Render exactly the Russian text on the next line — letter for letter, in correct Cyrillic spelling, keeping its punctuation and capitalisation, each word written exactly once (no word repeated across a line break), and without adding quotation marks around it:');
+  lines.push(primary);
   if (secondary) {
-    lines.push('Below it, smaller and lighter, exactly this text:');
-    lines.push(`«${secondary}»`);
+    lines.push('Below it, smaller and lighter, exactly the text on the next line:');
+    lines.push(secondary);
   }
   lines.push('Nothing else is written anywhere in the image: no extra words, letters, digits, prices, phone numbers, URLs, hashtags, slogans or watermarks, and no invented brand names. Typography: a clean modern bold sans-serif (geometric, in the spirit of Inter or Manrope), upright, perfectly legible with crisp edges — no outline, glow, perspective or distortion. High contrast: dark text on a light field or white text on a deep solid field, never across a busy area.');
   lines.push('');
@@ -157,8 +177,8 @@ export function buildEnhanceBannerImagePrompt(params: EnhanceBannerImageParams):
   lines.push('Keep the headline and the important details of the subject inside the safe area: at least 8 % of the height away from the top and bottom edges and 5 % of the width away from the sides.');
   lines.push('');
   lines.push('LOOK');
-  lines.push("Bright, clean, premium commercial quality — a banner a leading marketplace would run. Soft, even studio lighting; natural true-to-life colours; the whole frame uniformly sharp from edge to edge, background included (deep focus). The background is one calm continuous field — a solid colour or a smooth two-tone gradient that complements the subject and any brand colours from the reference — with no texture, pattern or scenery. The subject stands on it with a soft natural contact shadow. A photographed subject stays photo-real; an illustrated one stays flat vector. The surface is otherwise untouched: no frames, badges, stickers, ribbons, buttons or panels anywhere — the website adds its own button later.");
+  lines.push("Bright, clean, premium commercial quality — a banner a leading marketplace would run. Soft, even studio lighting; natural true-to-life colours; the whole frame uniformly sharp from edge to edge, background included (deep focus). The background is one calm continuous field — a solid colour or a smooth two-tone gradient that complements the subject and any brand colours from the reference — with no texture, pattern or scenery. The subject stands on it with a soft natural contact shadow. A photographed subject stays photo-real; an illustrated one stays flat vector. Apart from the subject, the headline and the plain background, the image contains nothing else.");
   lines.push('');
-  lines.push(`Final check before you output: the headline reads exactly «${primary}» with no typos; the reserved ${layout.reserved} is plain background with nothing on it; nothing important touches the edges; the image is ${aspect}.`);
+  lines.push(`Final check before you output: the headline reads exactly: ${primary} — every letter correct, each word once, no quotation marks added; the reserved ${layout.reserved} is plain background identical to its surroundings; nothing important touches the edges; the image is ${aspect}.`);
   return lines.join('\n');
 }

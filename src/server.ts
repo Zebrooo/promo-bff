@@ -47,6 +47,7 @@ import { validateEnhanceBannerImageParams } from './models/enhance-banner-image/
 import { createOpenrouterClient } from './services/openrouter-client';
 import { createOpenrouterImageClient } from './services/openrouter-image-client';
 import { createReferenceInliner } from './services/reference-image';
+import { createHeadlineChecker } from './services/headline-check';
 import { createAiCache } from './services/ai-cache';
 import { createRateLimitStore } from './services/rate-limit-store';
 import { createCostLog } from './services/cost-log';
@@ -269,6 +270,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     inlineReference: createReferenceInliner({
       allowedPrefixes: config.aaSupabase.url ? [`${config.aaSupabase.url}/storage/v1/object/public/`] : [],
     }),
+    // Сверка заголовка на готовом баннере, при расхождении — одна повторная
+    // генерация (см. headline-check.ts и banner-image-pipeline.ts).
+    headlineChecker: createHeadlineChecker(),
     imageCache: createAiCache<CachedBannerImage>({ defaultTtlMs: config.ai.cacheTtlMs }),
     rateLimit: aiRateLimit,
     costLog: aiCostLog,

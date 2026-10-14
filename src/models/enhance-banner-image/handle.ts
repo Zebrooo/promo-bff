@@ -10,7 +10,7 @@
  */
 import { canonicalCacheKey } from '../../services/ai-cache';
 import { runBannerImage, type BannerImagePipelineDeps } from '../../services/banner-image-pipeline';
-import { buildEnhanceBannerImagePrompt } from './prompt';
+import { bannerHeadlineText, buildEnhanceBannerImagePrompt } from './prompt';
 import type { EnhanceBannerImageParams, EnhanceBannerImageResult } from './types';
 
 // Реэкспорт общих типов — server.ts продолжает импортировать их отсюда.
@@ -43,6 +43,7 @@ export async function handleEnhanceBannerImage(
       cacheKey,
       prompt: buildEnhanceBannerImagePrompt(params),
       imageUrl: params.imageUrl,
+      expectedText: bannerHeadlineText(params.draft),
       width: params.width,
       height: params.height,
       label: 'enhance-banner-image',
