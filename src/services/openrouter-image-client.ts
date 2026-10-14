@@ -1,14 +1,18 @@
 /**
  * OpenRouter image-generation/editing client (default: Google "Nano Banana 2"
  * = `google/gemini-3.1-flash-image-preview`). The model takes a text prompt
- * + an input image and returns a NEW image (text rendered onto the banner).
+ * (+ optional reference image) and returns a NEW image.
  *
  * Same shape as openrouter-client.ts (factory + injectable fetch + RUB cost
  * estimate), so tests can mock `fetch` without hitting real OpenRouter.
  *
+ * Форму кадра задаёт `image_config.aspect_ratio` (OpenRouter передаёт его в
+ * Gemini). Без него модель выбирает пропорции сама — для полосы 8:1 это были
+ * 1,2:1 и 0,6:1, и cover-кроп дальше выбрасывал бо́льшую часть кадра.
+ *
  * Output: a base64 data URL. The caller is responsible for uploading it
- * somewhere durable (the cabinet's /api/enhance-banner-image proxies the data
- * URL to Supabase Storage so the cabinet UI can display a public https://...).
+ * somewhere durable (the cabinet's /api/eb proxies the data URL to Supabase
+ * Storage so the cabinet UI can display a public https://...).
  */
 import { config as appConfig } from '../config';
 import { openrouterFetch } from './openrouter-fetch';
@@ -24,12 +28,20 @@ export interface OpenrouterImageConfig {
   timeoutMs: number;
 }
 
+/** Размер картинки у Gemini: «1K» — умолчание провайдера (≈1 Мпикс при любом
+ *  соотношении, полоса 8:1 выходит шире 2400 px). */
+export type OpenrouterImageSize = '0.5K' | '1K' | '2K' | '4K';
+
 export interface OpenrouterImageCallParams {
   /** Plain instructions for the model. */
   prompt: string;
-  /** Input image (the user's original) as an `https://...` URL or base64
-   *  data URL. The model uses it as a visual reference / edit source. */
-  imageUrl: string;
+  /** Optional reference image (the user's original) as an `https://...` URL
+   *  or base64 data URL. Omitted for pure text-to-image. */
+  imageUrl?: string;
+  /** Соотношение сторон из набора модели, напр. '8:1' (см. banner-aspect). */
+  aspectRatio?: string;
+  /** Размер; без него — умолчание провайдера. */
+  imageSize?: OpenrouterImageSize;
   /** Override the default image model id. */
   model?: string;
 }
@@ -56,6 +68,26 @@ export interface OpenrouterImageClientOverrides {
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
+/** Тело запроса — вынесено, чтобы тест проверял форму без сети. */
+export function buildImageRequestBody(params: OpenrouterImageCallParams, defaultModel: string): Record<string, unknown> {
+  const content: Array<Record<string, unknown>> = [{ type: 'text', text: params.prompt }];
+  if (params.imageUrl) {
+    content.push({ type: 'image_url', image_url: { url: params.imageUrl } });
+  }
+  const body: Record<string, unknown> = {
+    model: params.model ?? defaultModel,
+    modalities: ['image', 'text'],
+    messages: [{ role: 'user', content }],
+  };
+  if (params.aspectRatio || params.imageSize) {
+    body.image_config = {
+      ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+      ...(params.imageSize ? { image_size: params.imageSize } : {}),
+    };
+  }
+  return body;
+}
+
 export function createOpenrouterImageClient(overrides: OpenrouterImageClientOverrides = {}): OpenrouterImageClient {
   const cfg: OpenrouterImageConfig = { ...appConfig.openrouterImage, ...overrides.config };
   const fetchImpl = overrides.fetchImpl ?? openrouterFetch;
@@ -76,18 +108,7 @@ export function createOpenrouterImageClient(overrides: OpenrouterImageClientOver
       if (referer) headers['HTTP-Referer'] = referer;
       if (appTitle) headers['X-Title'] = appTitle;
 
-      // Multi-modal user message: text prompt + the source image.
-      const body = JSON.stringify({
-        model,
-        modalities: ['image', 'text'],
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: params.prompt },
-            { type: 'image_url', image_url: { url: params.imageUrl } },
-          ],
-        }],
-      });
+      const body = JSON.stringify(buildImageRequestBody(params, cfg.imageModel));
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);

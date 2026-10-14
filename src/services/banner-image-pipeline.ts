@@ -4,14 +4,19 @@
  *   cache get → rate-limit → openrouter call → validate → transcode webp → cache set
  *   → cost-log → ok
  *
- * Хендлеры остаются тонкими: строят cacheKey + prompt + imageUrl (референс или
- * 1×1 placeholder) и зовут runBannerImage. Failure envelope — как у всех моделей
+ * Хендлеры остаются тонкими: строят cacheKey + prompt (+ imageUrl-референс) и
+ * зовут runBannerImage. Failure envelope — как у всех моделей
  * (HTTP 200, status в body).
+ *
+ * Соотношение сторон модели задаётся здесь из целевых W×H (pickAspectRatio):
+ * модель рисует кадр почти нужной формы, а cover-кроп транскода остаётся
+ * страховкой на остаток (4:1 → 4,83:1 у телефонной полосы), а не ножом.
  */
 import type { OpenrouterImageClient } from './openrouter-image-client';
 import type { AiCache } from './ai-cache';
 import type { RateLimitStore } from './rate-limit-store';
 import type { CostLog } from './cost-log';
+import { pickAspectRatio } from './banner-aspect';
 import { transcodeBannerToWebp } from './banner-image-transcode';
 
 export interface Logger {
@@ -40,9 +45,9 @@ export interface BannerImageRequest {
   cacheKey: string;
   /** Полный промпт для модели. */
   prompt: string;
-  /** Референс-картинка (enhance) или 1×1 placeholder (generate). */
-  imageUrl: string;
-  /** Целевые размеры слота — под них кропим/ресайзим результат. */
+  /** Референс-картинка (enhance); у text-to-image (generate) её нет. */
+  imageUrl?: string;
+  /** Целевые размеры слота — под них просим форму кадра и кропим результат. */
   width: number;
   height: number;
   /** Префикс для лог-сообщений, напр. 'enhance-banner-image'. */
@@ -70,7 +75,11 @@ export async function runBannerImage(
 
   let result;
   try {
-    result = await openrouterImage.call({ prompt: req.prompt, imageUrl: req.imageUrl });
+    result = await openrouterImage.call({
+      prompt: req.prompt,
+      imageUrl: req.imageUrl,
+      aspectRatio: pickAspectRatio(req.width, req.height),
+    });
   } catch (err) {
     logger?.error({ err }, `${req.label}: openrouter call failed`);
     return { status: 'error', reason: 'image_unavailable' };
