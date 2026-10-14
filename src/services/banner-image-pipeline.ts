@@ -17,6 +17,7 @@ import type { AiCache } from './ai-cache';
 import type { RateLimitStore } from './rate-limit-store';
 import type { CostLog } from './cost-log';
 import { pickAspectRatio } from './banner-aspect';
+import type { ReferenceInliner } from './reference-image';
 import { transcodeBannerToWebp } from './banner-image-transcode';
 
 export interface Logger {
@@ -35,6 +36,9 @@ export interface BannerImagePipelineDeps {
   imageCache: AiCache<CachedBannerImage>;
   rateLimit: RateLimitStore;
   costLog: CostLog;
+  /** Скачивает референс из нашего хранилища и вкладывает его base64 — см.
+   *  reference-image.ts. Без него адрес уходит модели как есть. */
+  inlineReference?: ReferenceInliner;
   logger?: Logger;
 }
 
@@ -62,7 +66,7 @@ export async function runBannerImage(
   req: BannerImageRequest,
   deps: BannerImagePipelineDeps,
 ): Promise<BannerImagePipelineResult> {
-  const { openrouterImage, imageCache, rateLimit, costLog, logger } = deps;
+  const { openrouterImage, imageCache, rateLimit, costLog, inlineReference, logger } = deps;
 
   const cached = imageCache.get(req.cacheKey);
   if (cached) {
@@ -73,11 +77,21 @@ export async function runBannerImage(
     return { status: 'error', reason: 'rate_limited' };
   }
 
+  let imageUrl = req.imageUrl;
+  if (imageUrl && inlineReference) {
+    try {
+      imageUrl = await inlineReference(imageUrl);
+    } catch (err) {
+      logger?.error({ err }, `${req.label}: reference fetch failed`);
+      return { status: 'error', reason: 'image_unavailable' };
+    }
+  }
+
   let result;
   try {
     result = await openrouterImage.call({
       prompt: req.prompt,
-      imageUrl: req.imageUrl,
+      imageUrl,
       aspectRatio: pickAspectRatio(req.width, req.height),
     });
   } catch (err) {

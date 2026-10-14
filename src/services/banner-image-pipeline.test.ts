@@ -60,3 +60,22 @@ describe('runBannerImage', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('runBannerImage — референс', () => {
+  it('референс вкладывается через inlineReference, модель получает data URL', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const d = deps(calls);
+    d.inlineReference = async (url) => `data:image/webp;base64,${Buffer.from(url).toString('base64')}`;
+    await runBannerImage({ advertiserId: 'a', cacheKey: 'k', prompt: 'p', imageUrl: 'https://storage.example/x.webp', width: 8, height: 1, label: 't' }, d);
+    expect(calls[0].imageUrl).toBe(`data:image/webp;base64,${Buffer.from('https://storage.example/x.webp').toString('base64')}`);
+  });
+
+  it('референс не скачался → image_unavailable, модель не зовётся', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const d = deps(calls);
+    d.inlineReference = async () => { throw new Error('reference-image: 404'); };
+    const result = await runBannerImage({ advertiserId: 'a', cacheKey: 'k', prompt: 'p', imageUrl: 'https://storage.example/x.webp', width: 8, height: 1, label: 't' }, d);
+    expect(result).toEqual({ status: 'error', reason: 'image_unavailable' });
+    expect(calls).toHaveLength(0);
+  });
+});
