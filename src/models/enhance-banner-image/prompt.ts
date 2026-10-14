@@ -110,7 +110,7 @@ function layoutFor(params: EnhanceBannerImageParams, lines: string): Layout {
       heading: 'LAYOUT — a wide strip, read left to right in three zones',
       lines: [
         `- ${capitalize(far)} ${subjectZone}: the subject, large, filling the full height (it may run off the ${far} edge).`,
-        `- Middle: the headline on the plain background, ${lines}; cap height about ${capHeight} of the strip height. If it does not fit, make it smaller — it never crosses into the reserved zone.`,
+        `- Middle: the headline on the plain background, left-aligned and starting right after the subject, ${lines}; cap height about ${capHeight} of the strip height. If it does not fit, make it smaller — its longest line ends before the reserved zone.`,
         reservedLine(reserved),
       ],
       reserved,

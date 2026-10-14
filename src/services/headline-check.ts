@@ -26,7 +26,7 @@ export interface HeadlineChecker {
 }
 
 export const TRANSCRIBE_PROMPT =
-  'Transcribe every piece of text visible in this image, exactly as written, character for character, including any typos or garbled words. Output only the transcription, one line per text block, nothing else.';
+  'Transcribe every piece of text visible in this image, exactly as written, character for character, including any typos or garbled words. If a character is malformed, broken or unreadable, write it as ? instead of guessing. Output only the transcription, one line per text block, nothing else.';
 
 /** Только буквы и цифры в нижнем регистре: кавычки, дефисы, пробелы и регистр
  *  модель-читатель передаёт нестабильно, а опечатка — это всегда другая буква. */
