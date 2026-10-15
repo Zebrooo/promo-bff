@@ -237,6 +237,10 @@ export interface Promo {
   imageUrl?: string;
   /** Focal metadata for imageUrl. Missing means the renderer uses the centre. */
   imageFocalPoint?: ImageFocalPoint;
+  /** Banner campaigns only: the headline is baked into imageUrl (AI creative
+   *  from the cabinet), so the storefront must not overlay the title again.
+   *  Copied from the stored creative by campaign-to-ad; pool promos never set it. */
+  titleInImage?: boolean;
   /** CTA: deep link/route + optional label + optional pill position (tl/tr/bl/br;
    *  default "br" on the storefront). */
   action?: { href: string; label?: string; position?: string };
