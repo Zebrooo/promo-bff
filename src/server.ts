@@ -44,6 +44,8 @@ import { handleEnhancePromo, type EnhanceDeps, type CachedSuggestion } from './m
 import { validateEnhanceParams } from './models/enhance-promo/validate';
 import { handleEnhanceBannerImage, type EnhanceBannerImageDeps, type CachedBannerImage } from './models/enhance-banner-image/handle';
 import { validateEnhanceBannerImageParams } from './models/enhance-banner-image/validate';
+import { handleGenerateBannerImage } from './models/generate-banner-image/handle';
+import { validateGenerateBannerImageParams } from './models/generate-banner-image/validate';
 import { createOpenrouterClient } from './services/openrouter-client';
 import { createOpenrouterImageClient } from './services/openrouter-image-client';
 import { createReferenceInliner } from './services/reference-image';
@@ -263,7 +265,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     ...opts.deps,
   };
 
-  const enhanceBannerImageDeps: EnhanceBannerImageDeps = {
+  // Общий набор для /enhance-banner-image и /generate-banner-image: оба идут
+  // через banner-image-pipeline. У text-to-image референса нет, так что
+  // inlineReference и headlineChecker там просто не задействованы.
+  const bannerImageDeps: EnhanceBannerImageDeps = {
     openrouterImage: createOpenrouterImageClient(),
     // Референс из публичного бакета AA-Supabase вкладываем в запрос сами —
     // провайдер по нашему адресу не ходит (см. reference-image.ts).
@@ -672,7 +677,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!validation.ok) {
       return reply.code(400).send({ error: 'bad_request', reason: validation.error });
     }
-    const result = await handleEnhanceBannerImage(validation.params, enhanceBannerImageDeps);
+    const result = await handleEnhanceBannerImage(validation.params, bannerImageDeps);
+    return reply.code(200).send(result);
+  });
+
+  // Text-to-image без референса: кабинет (/api/generate-image) шлёт
+  // { advertiserId, prompt, width, height }, обратно — тот же envelope с
+  // base64 data URL. Картинка без текста, надписи поверх рисует витрина.
+  app.post('/generate-banner-image', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+    const validation = validateGenerateBannerImageParams(request.body ?? {});
+    if (!validation.ok) {
+      return reply.code(400).send({ error: 'bad_request', reason: validation.error });
+    }
+    const result = await handleGenerateBannerImage(validation.params, bannerImageDeps);
     return reply.code(200).send(result);
   });
 
