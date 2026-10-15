@@ -15,6 +15,7 @@ import type { BalanceService } from './services/balance-service';
 import type { ChargeService } from './services/charge-service';
 import type { EventStore, EventPayload } from './services/event-store';
 import type { AnalyticsStore } from './services/analytics-store';
+import type { OpenrouterImageCallParams } from './services/openrouter-image-client';
 import { makePromo } from './test-utils';
 import type { Promo } from './promo-selector/types';
 
@@ -1156,6 +1157,54 @@ describe('POST /errors', () => {
     const app = buildServer({ logger: false, deps: { errorStore: { recordError: async () => { throw new Error('down'); } } } });
     const res = await app.inject({ method: 'POST', url: '/errors', headers: { authorization: 'Bearer t' }, payload: { service: 'abkhaz-auto', message: 'boom' } });
     expect(res.statusCode).toBe(502);
+    await app.close();
+  });
+});
+
+describe('POST /generate-banner-image', () => {
+  // 1×1 PNG — sharp его читает, транскод в webp под слот проходит честно
+  // (та же заглушка, что в banner-image-pipeline.test.ts).
+  const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+  const imageDeps = (calls: OpenrouterImageCallParams[] = []) => ({
+    openrouterImage: {
+      async call(params: OpenrouterImageCallParams) {
+        calls.push(params);
+        return { imageDataUrl: PNG_1x1, model: 'google/test-image', costRub: 1 };
+      },
+    },
+    costLog: { append: async () => {} },
+  });
+  const payload = { advertiserId: 'cabinet', prompt: 'летний попап для гостиницы в Гагре', width: 8, height: 1 };
+
+  it('401 без тикета', async () => {
+    const app = buildServer({ logger: false, deps: imageDeps() });
+    const res = await app.inject({ method: 'POST', url: '/generate-banner-image', payload });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('400 на тело без prompt', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const app = buildServer({ logger: false, deps: imageDeps(calls) });
+    const res = await app.inject({ method: 'POST', url: '/generate-banner-image', headers: AUTH, payload: { advertiserId: 'cabinet', width: 8, height: 1 } });
+    expect(res.statusCode).toBe(400);
+    expect(body(res)).toMatchObject({ error: 'bad_request' });
+    expect(calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('200 с envelope ok: модель зовётся без референса, картинка — webp под слот', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const app = buildServer({ logger: false, deps: imageDeps(calls) });
+    const res = await app.inject({ method: 'POST', url: '/generate-banner-image', headers: AUTH, payload });
+    expect(res.statusCode).toBe(200);
+    const json = body(res) as { status: string; data: { imageDataUrl: string; cacheHit: boolean; model: string } };
+    expect(json).toMatchObject({ status: 'ok', data: { cacheHit: false, model: 'google/test-image' } });
+    expect(json.data.imageDataUrl.startsWith('data:image/webp;base64,')).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].imageUrl).toBeUndefined();
+    expect(calls[0].aspectRatio).toBe('8:1');
+    expect(calls[0].prompt).toContain('летний попап для гостиницы в Гагре');
     await app.close();
   });
 });
