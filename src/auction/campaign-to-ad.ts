@@ -159,6 +159,10 @@ export function campaignToAd(c: CampaignCandidate, target?: AdTargetSize): Adver
     : primaryImageProjection(r);
   if (image.imageUrl !== undefined) ad.imageUrl = image.imageUrl;
   if (image.imageFocalPoint !== undefined) ad.imageFocalPoint = image.imageFocalPoint;
+  // The cabinet marks a creative whose headline the AI image already carries
+  // (enhance-banner-image bakes it in every format); the storefront then skips
+  // its own title overlay. Meaningless without an image, so it travels with one.
+  if (r.titleInImage === true && image.imageUrl !== undefined) ad.titleInImage = true;
   const backgroundColor = str(r.backgroundColor);
   if (backgroundColor !== undefined) ad.backgroundColor = backgroundColor;
   const textColor = str(r.textColor);

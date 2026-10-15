@@ -257,3 +257,17 @@ describe('campaignToAd', () => {
     expect(ad).toEqual({ id: 'campaign:42', format: 'popup', title: 'Hi' });
   });
 });
+
+describe('campaignToAd — titleInImage (the cabinet baked the headline into the image)', () => {
+  it('copies the flag for a banner whose image carries the headline', () => {
+    const ad = campaignToAd(cand({ format: 'banner', title: 'Buy', imageUrl: 'https://x/b.png', titleInImage: true }));
+    expect(ad?.titleInImage).toBe(true);
+  });
+
+  it('drops the flag when it is not literally true or there is no image', () => {
+    expect(campaignToAd(cand({ format: 'banner', title: 'Buy', imageUrl: 'https://x/b.png', titleInImage: 'yes' })))
+      .not.toHaveProperty('titleInImage');
+    expect(campaignToAd(cand({ format: 'banner', title: 'Buy', titleInImage: true })))
+      .not.toHaveProperty('titleInImage');
+  });
+});
