@@ -1,7 +1,9 @@
 /**
  * Транскод сгенерённого моделью баннера (часто PNG ~1.3 МБ) в компактный WebP,
  * вписанный РОВНО в целевой слот W×H умным кропом (sharp attention — фокус на
- * содержимом, не центр вслепую). Зачем:
+ * содержимом, не центр вслепую). Кроп по центру — для промпта, который задаёт
+ * позиции в долях готового файла (/repair-banner-image): перевести их в кадр
+ * модели можно, только если заранее известно, какие края срежутся. Зачем:
  *   - убирает пересылку мегабайтного base64 data-URL на витрину;
  *   - гарантирует webp в storage (витрина грузит его напрямую);
  *   - подгоняет кадр под пропорции слота.
@@ -12,11 +14,14 @@
  */
 const DATA_URL_RE = /^data:image\/([a-z0-9+.-]+);base64,(.+)$/i;
 
+/** attention — по содержимому (умолчание), centre — поровну с обеих сторон. */
+export type BannerCrop = 'attention' | 'centre';
+
 export async function transcodeBannerToWebp(
   dataUrl: string,
   width: number,
   height: number,
-  quality = 80,
+  { quality = 80, crop = 'attention' }: { quality?: number; crop?: BannerCrop } = {},
 ): Promise<string | null> {
   try {
     const m = DATA_URL_RE.exec(dataUrl);
@@ -28,7 +33,7 @@ export async function transcodeBannerToWebp(
     const { data: out, info } = await sharp(input, { failOn: 'none' })
       .resize(Math.round(width), Math.round(height), {
         fit: 'cover',
-        position: sharp.strategy.attention,
+        position: crop === 'centre' ? 'centre' : sharp.strategy.attention,
       })
       .webp({ quality })
       .toBuffer({ resolveWithObject: true });

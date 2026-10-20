@@ -46,6 +46,8 @@ import { handleEnhanceBannerImage, type EnhanceBannerImageDeps, type CachedBanne
 import { validateEnhanceBannerImageParams } from './models/enhance-banner-image/validate';
 import { handleGenerateBannerImage } from './models/generate-banner-image/handle';
 import { validateGenerateBannerImageParams } from './models/generate-banner-image/validate';
+import { handleRepairBannerImage } from './models/repair-banner-image/handle';
+import { validateRepairBannerImageParams } from './models/repair-banner-image/validate';
 import { createOpenrouterClient } from './services/openrouter-client';
 import { createOpenrouterImageClient } from './services/openrouter-image-client';
 import { createReferenceInliner } from './services/reference-image';
@@ -265,9 +267,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     ...opts.deps,
   };
 
-  // Общий набор для /enhance-banner-image и /generate-banner-image: оба идут
-  // через banner-image-pipeline. У text-to-image референса нет, так что
-  // inlineReference и headlineChecker там просто не задействованы.
+  // Общий набор для /enhance-banner-image, /repair-banner-image и
+  // /generate-banner-image: все идут через banner-image-pipeline. У
+  // text-to-image референса нет, так что inlineReference и headlineChecker
+  // там просто не задействованы.
   const bannerImageDeps: EnhanceBannerImageDeps = {
     openrouterImage: createOpenrouterImageClient(),
     // Референс из публичного бакета AA-Supabase вкладываем в запрос сами —
@@ -678,6 +681,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: 'bad_request', reason: validation.error });
     }
     const result = await handleEnhanceBannerImage(validation.params, bannerImageDeps);
+    return reply.code(200).send(result);
+  });
+
+  // Модератор витрины чинит баннер рекламодателя под рекламные места:
+  // { advertiserId: "mod:<adminUserId>", imageUrl, width, height, mode, fixes,
+  // notes?, safeArea?, reservedZone?, draft, ctaPosition? }. careful — бережная
+  // правка присланной картинки, rebuild — как enhance, плюс требования
+  // модератора. Тикет, envelope и HTTP-политика — как у /enhance-banner-image.
+  app.post('/repair-banner-image', async (request, reply) => {
+    const auth = await authenticator.authenticate(request);
+    if (!auth.authorized) {
+      return reply.code(401).send({ error: 'unauthorized', reason: auth.reason ?? 'unauthorized' });
+    }
+    const validation = validateRepairBannerImageParams(request.body ?? {});
+    if (!validation.ok) {
+      return reply.code(400).send({ error: 'bad_request', reason: validation.error });
+    }
+    const result = await handleRepairBannerImage(validation.params, bannerImageDeps);
     return reply.code(200).send(result);
   });
 

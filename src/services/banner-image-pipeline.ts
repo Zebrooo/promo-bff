@@ -1,6 +1,7 @@
 /**
- * Общий пайплайн генерации баннер-картинки, разделяемый /enhance-banner-image и
- * /generate-banner-image (раньше две почти идентичные копии). Шаги:
+ * Общий пайплайн генерации баннер-картинки для /enhance-banner-image,
+ * /repair-banner-image и /generate-banner-image (раньше у enhance и generate
+ * были две почти идентичные копии). Шаги:
  *   cache get → rate-limit → референс base64 → [openrouter call → validate →
  *   transcode webp → cost-log → проверка заголовка]×≤2 → cache set → ok
  *
@@ -11,6 +12,8 @@
  * Соотношение сторон модели задаётся здесь из целевых W×H (pickAspectRatio):
  * модель рисует кадр почти нужной формы, а cover-кроп транскода остаётся
  * страховкой на остаток (4:1 → 4,83:1 у телефонной полосы), а не ножом.
+ * Режет он по содержимому (attention); repair просит по центру (`crop`), чтобы
+ * знать, какие края уйдут, — см. banner-image-transcode.ts.
  *
  * Проверка заголовка (headline-check.ts): готовый webp читает дешёвая
  * мультимодальная модель; если ожидаемого текста на нём нет — одна повторная
@@ -24,7 +27,7 @@ import type { CostLog } from './cost-log';
 import { pickAspectRatio } from './banner-aspect';
 import type { ReferenceInliner } from './reference-image';
 import { headlineMatches, type HeadlineChecker } from './headline-check';
-import { transcodeBannerToWebp } from './banner-image-transcode';
+import { transcodeBannerToWebp, type BannerCrop } from './banner-image-transcode';
 
 export interface Logger {
   info(obj: unknown, msg?: string): void;
@@ -65,6 +68,9 @@ export interface BannerImageRequest {
   height: number;
   /** Текст, который обязан быть на баннере; сверяется с готовой картинкой. */
   expectedText?: string;
+  /** Как вписать кадр модели в W×H; по умолчанию attention. centre — когда
+   *  промпт задаёт позиции в долях готового файла (repair). */
+  crop?: BannerCrop;
   /** Префикс для лог-сообщений, напр. 'enhance-banner-image'. */
   label: string;
 }
@@ -120,7 +126,7 @@ export async function runBannerImage(
 
     // Транскод в webp + умный кроп под слот. Fail-closed: без подтверждённого
     // точного W×H этот результат нельзя сохранять как адаптивный вариант.
-    const imageDataUrl = await transcodeBannerToWebp(result.imageDataUrl, req.width, req.height);
+    const imageDataUrl = await transcodeBannerToWebp(result.imageDataUrl, req.width, req.height, { crop: req.crop });
     if (!imageDataUrl) {
       logger?.error({}, `${req.label}: image transcode failed`);
       return { reason: 'image_unavailable' };

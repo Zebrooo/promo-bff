@@ -18,8 +18,9 @@ export type { CachedBannerImage } from '../../services/banner-image-pipeline';
 export type EnhanceBannerImageDeps = BannerImagePipelineDeps;
 
 /** Версия промпта в ключе кэша: новая редакция не должна отдавать картинки,
- *  сгенерированные старой. Поднимать при каждой смене prompt.ts. */
-const PROMPT_VERSION = 2;
+ *  сгенерированные старой. Поднимать при каждой смене prompt.ts — она же
+ *  входит в ключ /repair-banner-image (rebuild включает этот промпт). */
+export const PROMPT_VERSION = 2;
 
 export async function handleEnhanceBannerImage(
   params: EnhanceBannerImageParams,

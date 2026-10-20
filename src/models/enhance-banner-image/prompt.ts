@@ -69,7 +69,9 @@ function lineAdvice(length: number, shape: ReturnType<typeof bannerShape>): stri
   return 'broken into two or three balanced lines';
 }
 
-function shapeLine(width: number, height: number, aspect: string): string {
+/** Форма кадра словами — общая с /repair-banner-image: модель должна
+ *  слышать про форму одинаково, правит она баннер или собирает заново. */
+export function shapeLine(width: number, height: number, aspect: string): string {
   const shape = bannerShape(width, height);
   const ratio = width / height;
   if (shape === 'strip') {
