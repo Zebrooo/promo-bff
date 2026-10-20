@@ -84,19 +84,39 @@ describe('buildRepairBannerImagePrompt — careful', () => {
     // y' = 0,0862 + y × 0,8276; по ширине кадр не срезается.
     expect(prompt).toContain('inside the area from 0 % to 100 % across and from 16.9 % to 83.1 % down');
     expect(prompt).toContain('Keep the area from 10 % to 100 % across and from 58.3 % to 91.4 % down free');
-    // Запас от срезаемых краёв: 8,6 % среза + 2 % на глаз модели → 11 %.
-    expect(prompt).toContain('Keep all text, the logo and the key details of the subject at least 11 % of the height away from the top and bottom edges');
-    expect(prompt).toContain('all text, the logo and key details are at least 11 % of the height away from the top and bottom edges');
+    // Запас от срезаемых краёв (8,6 % среза + 2 % на глаз модели → 11 %) —
+    // отдельной строкой только без безопасной зоны: с ней он внутри зоны.
+    expect(prompt).not.toContain('away from the');
+    const noZone = buildRepairBannerImagePrompt(params({ width: 1160, height: 240, fixes: ['contrast'] }));
+    expect(noZone).toContain('Keep all text, the logo and the key details of the subject at least 11 % of the height away from the top and bottom edges');
+    expect(noZone).toContain('all text, the logo and key details are at least 11 % of the height away from the top and bottom edges');
   });
 
   it('запас от краёв — только при заметном срезе и по срезаемой оси', () => {
     expect(buildRepairBannerImagePrompt(params())).not.toContain('away from the');
     // 600×1000 → 9:16, срез 3,125 % с каждой стороны → 6 %.
-    expect(buildRepairBannerImagePrompt(params({ width: 600, height: 1000 })))
+    expect(buildRepairBannerImagePrompt(params({ width: 600, height: 1000, fixes: ['contrast'] })))
       .toContain('at least 6 % of the height away from the top and bottom edges');
+    // С fit_safe_area запас сидит в самой зоне — отдельной строки нет.
+    expect(buildRepairBannerImagePrompt(params({ width: 600, height: 1000 }))).not.toContain('away from the');
     // 1000×1100 → 1:1, кадр шире слота — режутся бока.
     expect(buildRepairBannerImagePrompt(params({ width: 1000, height: 1100, fixes: ['contrast'] })))
       .toContain('at least 7 % of the width away from the left and right edges');
+  });
+
+  it('безопасная зона у среза сужена до запаса: одно правило про полосу вместо двух', () => {
+    // Вся высота файла → в кадре 4:1 это 8,6 %..91,4 %, но модель кладёт текст
+    // на глаз: зона сужается до запаса 11 % и в правке, и в проверке.
+    const full = { x: 0, y: 0, w: 1, h: 1 };
+    const strip = buildRepairBannerImagePrompt(params({ width: 1160, height: 240, fixes: ['fit_safe_area'], safeArea: full }));
+    expect(count(strip, 'inside the area from 0 % to 100 % across and from 11 % to 89 % down')).toBe(2);
+    expect(strip).not.toContain('8.6 %');
+    // Срез по ширине (1000×1100 → 1:1): сужается по ширине, высота как есть.
+    const square = buildRepairBannerImagePrompt(params({ width: 1000, height: 1100, fixes: ['fit_safe_area'], safeArea: full }));
+    expect(square).toContain('inside the area from 7 % to 93 % across and from 0 % to 100 % down');
+    // Зона, и так отстоящая от среза дальше запаса, не меняется.
+    expect(buildRepairBannerImagePrompt(params({ width: 1160, height: 240, fixes: ['fit_safe_area'] })))
+      .toContain('from 16.9 % to 83.1 % down');
   });
 
   it('сильно другая форма — переложить элементы, пример под форму выхода', () => {
@@ -260,5 +280,17 @@ describe('buildRepairBannerImagePrompt — rebuild', () => {
     expect(tail).toContain('inside the area from 0 % to 100 % across and from 16.9 % to 83.1 % down');
     expect(tail).toContain('The area from 10 % to 100 % across and from 58.3 % to 91.4 % down is plain');
     expect(tail).not.toContain('away from the');
+  });
+
+  it('хвост ссылается на разделы промпта enhance, которые там действительно есть', () => {
+    // «This area replaces the RESERVED zone in LAYOUT above and in its final
+    // check» — переименуют раздел в enhance, и модель будет искать то, чего нет.
+    const sizes: [number, number][] = [[2400, 300], [1160, 240], [1200, 628], [1000, 1000], [600, 750]];
+    for (const [width, height] of sizes) {
+      const base = enhancePrompt(rebuild({ width, height }));
+      expect(base, `${width}×${height}`).toContain('\nLAYOUT');
+      expect(base, `${width}×${height}`).toContain('RESERVED');
+      expect(count(base, 'Final check before you output:'), `${width}×${height}`).toBe(1);
+    }
   });
 });

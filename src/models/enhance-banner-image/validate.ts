@@ -32,7 +32,9 @@ export function parseBannerImageTarget(b: Record<string, unknown>): Parsed<Banne
   if (typeof b.height !== 'number' || !Number.isInteger(b.height) || b.height <= 0 || b.height > 4096) {
     return { ok: false, error: 'height must be a positive integer ≤ 4096' };
   }
-  return { ok: true, value: { advertiserId: b.advertiserId, imageUrl: b.imageUrl, width: b.width, height: b.height } };
+  // Ключ лимита и учёта расходов — без случайных пробелов, одинаково у всех
+  // ручек картинок (generate-banner-image тоже обрезает).
+  return { ok: true, value: { advertiserId: b.advertiserId.trim(), imageUrl: b.imageUrl, width: b.width, height: b.height } };
 }
 
 /** Форма draft без требований к содержимому: что обязательно — решает ручка. */

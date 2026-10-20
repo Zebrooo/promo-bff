@@ -38,7 +38,8 @@ export interface RepairBannerImageParams {
   width: number;
   height: number;
   mode: RepairMode;
-  /** Выбранные модератором правки, без повторов. */
+  /** Выбранные модератором правки, без повторов. В rebuild пусто: список в
+   *  промпт не идёт, валидатор его отбрасывает (см. validate.ts). */
   fixes: RepairFix[];
   /** Указания модератора по-русски, уже очищенные (см. validate.ts). */
   notes?: string;

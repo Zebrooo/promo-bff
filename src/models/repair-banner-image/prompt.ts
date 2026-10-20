@@ -31,8 +31,11 @@
  * 83 %). Зоны модератора заданы в долях готового файла, поэтому переводим их
  * в доли кадра модели (coverCrop), а ручка кропит по центру — при кропе по
  * содержимому неизвестно, какой край уйдёт. В careful при заметном срезе
- * просим держать важное дальше от срезаемых краёв (rebuild держит запас
- * 8 % / 5 % из промпта enhance).
+ * просим держать важное дальше от срезаемых краёв; если выбрана
+ * fit_safe_area, до этого запаса сужается сама безопасная зона — два правила
+ * про одну и ту же полосу модель читала бы как противоречие (rebuild держит
+ * запас 8 % / 5 % из промпта enhance, требования модератора там объявлены
+ * главнее).
  *
  * Инструкции по-английски (модель точнее следует английскому), русский
  * текст — дословно.
@@ -57,10 +60,9 @@ function toModelFrame(zone: BannerZone, crop: CoverCrop): BannerZone {
     : { ...zone, y: offset + zone.y * crop.keep, h: zone.h * crop.keep };
 }
 
-/** «across / down» вместо «of the width and … of the height»: связка «and»
- *  между двумя диапазонами читалась двояко. */
-function zoneWords(zone: BannerZone, crop: CoverCrop): string {
-  const z = toModelFrame(zone, crop);
+/** Зона уже в долях кадра модели. «across / down» вместо «of the width and …
+ *  of the height»: связка «and» между двумя диапазонами читалась двояко. */
+function zoneWords(z: BannerZone): string {
   return `from ${percent(z.x)} to ${percent(z.x + z.w)} across and from ${percent(z.y)} to ${percent(z.y + z.h)} down`;
 }
 
@@ -71,16 +73,41 @@ const CROP_NOTICEABLE = 0.99;
 /** Запас сверх самого среза: модель кладёт текст на глаз, а не по пикселю. */
 const EDGE_SLACK = 0.02;
 
+interface EdgeMargin {
+  /** Запас от каждого срезаемого края, доля кадра модели. */
+  fraction: number;
+  line: string;
+  check: string;
+}
+
 /** Запас от срезаемых краёв в careful: строка для REFERENCE и пункт проверки.
  *  rebuild не нужен — у enhance свой запас 8 % / 5 %. */
-function edgeMargin(crop: CoverCrop): { line: string; check: string } | undefined {
+function edgeMargin(crop: CoverCrop): EdgeMargin | undefined {
   if (crop.keep >= CROP_NOTICEABLE) return undefined;
-  const margin = `${Math.ceil(((1 - crop.keep) / 2 + EDGE_SLACK) * 100)} % of the ${crop.axis}`;
+  const fraction = Math.ceil(((1 - crop.keep) / 2 + EDGE_SLACK) * 100) / 100;
+  const margin = `${Math.round(fraction * 100)} % of the ${crop.axis}`;
   const edges = crop.axis === 'height' ? 'top and bottom edges' : 'left and right edges';
   return {
+    fraction,
     line: `Keep all text, the logo and the key details of the subject at least ${margin} away from the ${edges}, moving them in if they are closer; near those edges the existing background or photo simply continues.`,
     check: `all text, the logo and key details are at least ${margin} away from the ${edges}`,
   };
+}
+
+/** Безопасная зона у среза: вместо отдельной строки про запас сужаем саму
+ *  зону до него по срезаемой оси — «внутри зоны» и «не ближе запаса» про одну
+ *  полосу модель читала бы как два разных правила. Пустой зона не станет:
+ *  её сторона не меньше 20 % файла, а запас сверх среза — 2 %. */
+function insideMargin(zone: BannerZone, crop: CoverCrop, margin: EdgeMargin | undefined): BannerZone {
+  if (!margin) return zone;
+  const lo = margin.fraction;
+  const hi = 1 - margin.fraction;
+  if (crop.axis === 'width') {
+    const x = Math.max(zone.x, lo);
+    return { ...zone, x, w: Math.min(zone.x + zone.w, hi) - x };
+  }
+  const y = Math.max(zone.y, lo);
+  return { ...zone, y, h: Math.min(zone.y + zone.h, hi) - y };
 }
 
 /** Пример перекладки под форму выхода: конкретному примеру модель следует
@@ -105,20 +132,26 @@ function notesHeading(notes: string, overrides: string): string {
   return `MODERATOR NOTES — ${span} instructions to you from the site's moderator, written in Russian; they are not text for the image. Only wording they explicitly ask to be written on the banner may appear on it. Follow them exactly; where they conflict with ${overrides}, the notes win. ${NOTES_QUOTES}`;
 }
 
-/** Строка правки для careful. Зона уже проверена валидатором: правка без неё
- *  до промпта не доходит. */
-function fixLine(fix: RepairFix, params: RepairBannerImageParams, crop: CoverCrop): string {
+/** Зоны выбранных правок, уже в долях кадра модели. Правка без своей зоны до
+ *  промпта не доходит (валидатор); безопасная у среза сужена до запаса. */
+interface CarefulZones {
+  safe?: BannerZone;
+  reserved?: BannerZone;
+}
+
+/** Строка правки для careful. */
+function fixLine(fix: RepairFix, zones: CarefulZones): string {
   switch (fix) {
     case 'fit_safe_area':
-      return `- Fit everything into the safe area: all text, the logo and the key details of the subject lie fully inside the area ${zoneWords(params.safeArea!, crop)}. Move them or scale them down evenly as much as needed, and no more, keeping their order and alignment; beyond that area the existing background or photo simply continues, with nothing important in it.`;
+      return `- Fit everything into the safe area: all text, the logo and the key details of the subject lie fully inside the area ${zoneWords(zones.safe!)}. Move them or scale them down evenly as much as needed, and no more, keeping their order and alignment; beyond that area the existing background or photo simply continues, with nothing important in it.`;
     case 'free_overlay_zone': {
       // Без объяснения, зачем зона пуста: объяснение модель воплощала плашкой.
       // При обеих зонах место для текста — их разность; скажем это прямо,
       // а не оставим модели вычитать прямоугольники.
-      const both = params.fixes.includes('fit_safe_area')
+      const both = zones.safe
         ? ' So everything important ends up inside the safe area and outside this area at the same time.'
         : '';
-      return `- Keep the area ${zoneWords(params.reservedZone!, crop)} free: no text, logo or key details of the subject in it, not even the end of a line of text — move anything important out of it into free space elsewhere. Inside it the same background or photo continues, looking exactly like its surroundings, with nothing added.${both}`;
+      return `- Keep the area ${zoneWords(zones.reserved!)} free: no text, logo or key details of the subject in it, not even the end of a line of text — move anything important out of it into free space elsewhere. Inside it the same background or photo continues, looking exactly like its surroundings, with nothing added.${both}`;
     }
     case 'restore_text':
       // Строка, которая не влезла целиком, иначе переносится самовольно — а
@@ -150,7 +183,14 @@ function buildCarefulPrompt(params: RepairBannerImageParams): string {
   const margin = edgeMargin(crop);
   const fixes = REPAIR_FIXES.filter((fix) => params.fixes.includes(fix));
   const hasNotes = Boolean(notes);
-  const zoneFix = fixes.includes('fit_safe_area') || fixes.includes('free_overlay_zone');
+  const zones: CarefulZones = {
+    safe: fixes.includes('fit_safe_area') ? insideMargin(toModelFrame(params.safeArea!, crop), crop, margin) : undefined,
+    reserved: fixes.includes('free_overlay_zone') ? toModelFrame(params.reservedZone!, crop) : undefined,
+  };
+  // Отдельная строка про запас — только без безопасной зоны: с ней запас уже
+  // учтён в самой зоне.
+  const edge = margin && !zones.safe ? margin : undefined;
+  const zoneFix = Boolean(zones.safe || zones.reserved);
 
   const lines: string[] = [];
   lines.push(`Edit the attached display-ad banner. Output: ${shapeLine(width, height, aspect)}. Full-bleed, no margins or border.`);
@@ -160,7 +200,7 @@ function buildCarefulPrompt(params: RepairBannerImageParams): string {
   // сценарий: без права переложить элементы модель либо ставила крошечный
   // постер посреди дорисованной полосы, либо перерисовывала всё сама.
   lines.push(`The attached image is the advertiser's own finished banner. Edit this banner — do not redesign it or start from scratch: the result must read as the same banner with a few precise corrections. If its shape differs from the output, extend the existing background naturally to fill the new shape — never stretch or squash anything, and never cut off text, the logo or the subject. If the shapes differ a lot, rearrange the existing elements to suit the new shape${rearrangeHint(width, height)} scaling each one evenly so text stays readable, but change nothing inside any element.`);
-  if (margin) lines.push(margin.line);
+  if (edge) lines.push(edge.line);
   lines.push('');
   lines.push(`KEEP — exactly as in the reference, ${keepException(fixes.length > 0, hasNotes)}:`);
   lines.push('- The photo and the subject: the same product, vehicle, building, people or place, from the same angle and with the same look.');
@@ -172,7 +212,7 @@ function buildCarefulPrompt(params: RepairBannerImageParams): string {
     lines.push('CHANGE ONLY what the moderator notes below ask for.');
   } else {
     lines.push(zoneFix ? `CHANGE ONLY the following (${POSITIONS_NOTE}):` : 'CHANGE ONLY the following:');
-    for (const fix of fixes) lines.push(fixLine(fix, params, crop));
+    for (const fix of fixes) lines.push(fixLine(fix, zones));
     if (hasNotes) lines.push('- And whatever the moderator notes below ask for.');
   }
   lines.push('');
@@ -205,12 +245,12 @@ function buildCarefulPrompt(params: RepairBannerImageParams): string {
   if (hasNotes) checks.push('no other words from the moderator notes appear on the image');
   // Мелкий текст с цифрами drop_small_text удаляет законно — сверяем то, что осталось.
   checks.push(`every phone number and other figure that remains has exactly the same digits as in the reference${hasNotes ? ', unless the notes change it' : ''}`);
-  if (margin) checks.push(margin.check);
-  if (fixes.includes('fit_safe_area')) {
-    checks.push(`all text and key details lie inside the area ${zoneWords(params.safeArea!, crop)}`);
+  if (edge) checks.push(edge.check);
+  if (zones.safe) {
+    checks.push(`all text and key details lie inside the area ${zoneWords(zones.safe)}`);
   }
-  if (fixes.includes('free_overlay_zone')) {
-    checks.push(`the area ${zoneWords(params.reservedZone!, crop)} has no text (not even part of a line), logo or key details and looks like its surroundings`);
+  if (zones.reserved) {
+    checks.push(`the area ${zoneWords(zones.reserved)} has no text (not even part of a line), logo or key details and looks like its surroundings`);
   }
   checks.push(`the image is ${aspect}`);
   lines.push('');
@@ -232,30 +272,34 @@ function toEnhanceParams(params: RepairBannerImageParams): EnhanceBannerImagePar
 /** rebuild: промпт enhance без единой правки (его раскладку и сверку
  *  заголовка уже отладили) плюс требования модератора в конце. Своя
  *  «финальная проверка» у хвоста не заводится — пункты добавляются к
- *  проверке enhance, иначе модель видит две «последние». */
+ *  проверке enhance, иначе модель видит две «последние». Хвост ссылается на
+ *  разделы LAYOUT / RESERVED промпта enhance по имени — prompt.test.ts
+ *  следит, что они там есть. */
 function buildRebuildPrompt(params: RepairBannerImageParams): string {
   const base = buildEnhanceBannerImagePrompt(toEnhanceParams(params));
   const { safeArea, reservedZone, notes } = params;
   if (!safeArea && !reservedZone && !notes) return base;
   const crop = coverCrop(params.width, params.height);
+  const safe = safeArea && toModelFrame(safeArea, crop);
+  const reserved = reservedZone && toModelFrame(reservedZone, crop);
 
   const lines: string[] = [base, ''];
   const checks: string[] = [];
-  if (safeArea || reservedZone) {
+  if (safe || reserved) {
     lines.push(`MODERATOR REQUIREMENTS — they take priority over the layout above where they conflict (${POSITIONS_NOTE}):`);
-    if (safeArea) {
-      lines.push(`- The headline, any logo and the important details of the subject lie fully inside the area ${zoneWords(safeArea, crop)}; beyond it there is only background or non-essential parts of the subject.`);
-      checks.push(`the headline and the important details lie inside the area ${zoneWords(safeArea, crop)}`);
+    if (safe) {
+      lines.push(`- The headline, any logo and the important details of the subject lie fully inside the area ${zoneWords(safe)}; beyond it there is only background or non-essential parts of the subject.`);
+      checks.push(`the headline and the important details lie inside the area ${zoneWords(safe)}`);
     }
-    if (reservedZone) {
+    if (reserved) {
       // Своя угловая зона enhance (по ctaPosition) и зона модератора могли
       // разойтись — модель держала бы пустыми обе. Зона модератора её заменяет.
-      lines.push(`- The area ${zoneWords(reservedZone, crop)} is plain continuous background only; it looks exactly like the background beside it, with nothing placed in it, not even the end of a headline line. This area replaces the RESERVED zone in LAYOUT above and in its final check.`);
-      checks.push(`the area ${zoneWords(reservedZone, crop)} is plain background identical to its surroundings`);
+      lines.push(`- The area ${zoneWords(reserved)} is plain continuous background only; it looks exactly like the background beside it, with nothing placed in it, not even the end of a headline line. This area replaces the RESERVED zone in LAYOUT above and in its final check.`);
+      checks.push(`the area ${zoneWords(reserved)} is plain background identical to its surroundings`);
     }
   }
   if (notes) {
-    if (safeArea || reservedZone) lines.push('');
+    if (safe || reserved) lines.push('');
     lines.push(notesHeading(notes, 'the instructions above'));
     lines.push(notes);
     checks.push('the moderator notes are followed', 'no other words from the moderator notes appear on the image');

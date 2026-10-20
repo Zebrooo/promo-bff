@@ -93,19 +93,17 @@ describe('handleRepairBannerImage', () => {
     expect(second).toMatchObject({ status: 'ok', data: { cacheHit: true } });
   });
 
-  it('всё, что меняет картинку, меняет и ключ кэша', async () => {
+  it('ключ кэша — от того, что уходит модели: промпт, референс, размер, вариант', async () => {
     // Каждый вариант меняет ровно одно поле: иначе пропажу поля из ключа
     // маскировало бы соседнее (mode вместе с draft промахивался из-за draft).
-    // draft и ctaPosition картинку меняют только в rebuild — там и проверяем.
     const careful = params();
     const rebuild = params({ mode: 'rebuild', draft: { title: 'Заголовок' } });
-    const cases: [RepairBannerImageParams, Partial<RepairBannerImageParams>][] = [
+    const misses: [RepairBannerImageParams, Partial<RepairBannerImageParams>][] = [
       [careful, { mode: 'rebuild' }],
       [careful, { fixes: ['fit_safe_area'] }],
       [careful, { notes: 'Другое указание' }],
       [careful, { notes: undefined }],
       [careful, { safeArea: { x: 0, y: 0.2, w: 1, h: 0.8 } }],
-      [careful, { reservedZone: { x: 0, y: 0.8, w: 1, h: 0.2 } }],
       [careful, { width: 8 }],
       [careful, { height: 10 }],
       [careful, { imageUrl: 'https://example.com/other.png' }],
@@ -113,17 +111,40 @@ describe('handleRepairBannerImage', () => {
       [careful, { variant: 1 }],
       [rebuild, { draft: { title: 'Другой заголовок' } }],
       [rebuild, { ctaPosition: 'tl' }],
+      [rebuild, { safeArea: { x: 0, y: 0.2, w: 1, h: 0.8 } }],
+      [rebuild, { notes: undefined }],
+    ];
+    // Поля, которых в промпте нет, картинку не меняют — и ключ тоже: повтор
+    // не должен стоить новой генерации.
+    const hits: [RepairBannerImageParams, Partial<RepairBannerImageParams>][] = [
+      [careful, { draft: { title: 'Черновик объявления' } }],
+      [careful, { ctaPosition: 'tl' }],
+      // free_overlay_zone не выбрана — зона в промпт не идёт.
+      [careful, { reservedZone: { x: 0, y: 0.8, w: 1, h: 0.2 } }],
+      [rebuild, { fixes: ['contrast', 'clean_background'] }],
     ];
     const { d } = deps([]);
     for (const base of [careful, rebuild]) await handleRepairBannerImage(base, d);
-    for (const [base, over] of cases) {
+    for (const [base, over] of misses) {
       const result = await handleRepairBannerImage({ ...base, ...over }, d);
       expect(result, JSON.stringify(over)).toMatchObject({ status: 'ok', data: { cacheHit: false } });
+    }
+    for (const [base, over] of hits) {
+      const result = await handleRepairBannerImage({ ...base, ...over }, d);
+      expect(result, JSON.stringify(over)).toMatchObject({ status: 'ok', data: { cacheHit: true } });
     }
     // Контроль: исходные запросы по-прежнему из кэша.
     for (const base of [careful, rebuild]) {
       expect(await handleRepairBannerImage(base, d)).toMatchObject({ data: { cacheHit: true } });
     }
+  });
+
+  it('зона, которая действует, меняет ключ: reservedZone с free_overlay_zone', async () => {
+    const { d } = deps([]);
+    const base = params({ fixes: ['free_overlay_zone'], reservedZone: { x: 0, y: 0.8, w: 1, h: 0.2 } });
+    await handleRepairBannerImage(base, d);
+    expect(await handleRepairBannerImage({ ...base, reservedZone: { x: 0, y: 0.7, w: 1, h: 0.3 } }, d))
+      .toMatchObject({ data: { cacheHit: false } });
   });
 
   it('кадр модели кропится по центру в обоих режимах: под это пересчитаны зоны в промпте', async () => {

@@ -24,11 +24,19 @@ export const VARIANT_MAX = 20;
 const EPS = 1e-6;
 /** Безопасная зона уже 20 % — это не «зона», а ошибка в настройке места. */
 const SAFE_AREA_MIN_SIDE = 0.2;
+/** Сколько должно остаться свободным, чтобы зоны были выполнимы: доля
+ *  картинки вне занятой зоны и доля безопасной зоны вне занятой. Занятая зона
+ *  на весь кадр или поверх всей безопасной — команда «внутри безопасной и вне
+ *  занятой» без места, где это возможно; модель отработала бы её за деньги
+ *  и впустую. */
+const ZONE_MIN_FREE = 0.2;
 
 /** Указания модератора идут в промпт дословно, поэтому чистим только то, что
  *  модель могла бы принять за разметку или нарисовать:
  *   - управляющие символы и невидимые (\p{Cf}: мягкий перенос — модель
- *     рисовала бы дефис, нулевой пробел, BOM, смена направления текста);
+ *     рисовала бы дефис, нулевой пробел, BOM, смена направления текста),
+ *     кроме соединителей U+200C/U+200D — на них держатся составные эмодзи и
+ *     буквы арабицы, без них текст рассыпается;
  *   - переводы строки оставляем (списки правок), но \r\n, одиночный \r и
  *     разделители строк U+2028/2029 сводим к \n, а пустые строки схлопываем:
  *     в промпте пустая строка разделяет блоки, и абзац указаний слился бы со
@@ -40,7 +48,7 @@ export function cleanNotes(raw: string): string {
     .replace(/\r\n?|[\u2028\u2029]/g, '\n')
     .replace(/\t/g, ' ')
     .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g, '')
-    .replace(/\p{Cf}/gu, '')
+    .replace(/(?![\u200C\u200D])\p{Cf}/gu, '')
     .replace(/\p{Zs}+/gu, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{2,}/g, '\n')
@@ -71,6 +79,16 @@ function parseZone(
   return { ok: true, value: zone };
 }
 
+function area(zone: BannerZone): number {
+  return zone.w * zone.h;
+}
+
+function overlapArea(a: BannerZone, b: BannerZone): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
 export function validateRepairBannerImageParams(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { ok: false, error: 'body must be an object' };
@@ -88,16 +106,22 @@ export function validateRepairBannerImageParams(body: unknown): ValidationResult
   if (!Array.isArray(b.fixes)) {
     return { ok: false, error: `fixes must be an array of ${REPAIR_FIXES.join('|')}` };
   }
-  const fixes: RepairFix[] = [];
+  const listed: RepairFix[] = [];
   for (const fix of b.fixes) {
     if (typeof fix !== 'string' || !(REPAIR_FIXES as readonly string[]).includes(fix)) {
       return { ok: false, error: `unknown fix: ${String(fix)} (allowed: ${REPAIR_FIXES.join('|')})` };
     }
-    if (fixes.includes(fix as RepairFix)) {
+    if (listed.includes(fix as RepairFix)) {
       return { ok: false, error: `duplicate fix: ${fix}` };
     }
-    fixes.push(fix as RepairFix);
+    listed.push(fix as RepairFix);
   }
+  // В rebuild список правок в промпт не идёт: контраст, мелкий текст и фон
+  // и так закрывает промпт enhance, а зоны действуют сами по себе (prompt.ts).
+  // Форму списка проверили (опечатка — ошибка клиента), дальше он не идёт:
+  // иначе требования к данным правок и ключ кэша делали бы вид, что он
+  // что-то значит.
+  const fixes: RepairFix[] = mode === 'rebuild' ? [] : listed;
 
   let notes: string | undefined;
   if (given(b.notes)) {
@@ -151,7 +175,25 @@ export function validateRepairBannerImageParams(body: unknown): ValidationResult
   if (fixes.includes('restore_text') && !notes) {
     return { ok: false, error: 'restore_text requires notes with the full wording' };
   }
-  if (fixes.length === 0 && !notes) {
+
+  // Зона действует в careful вместе со своей правкой, в rebuild — сама по
+  // себе; проверяем выполнимость только действующих.
+  const usedSafeArea = mode === 'rebuild' || fixes.includes('fit_safe_area') ? safeArea : undefined;
+  const usedReservedZone = mode === 'rebuild' || fixes.includes('free_overlay_zone') ? reservedZone : undefined;
+  const minFree = `${ZONE_MIN_FREE * 100} %`;
+  if (usedReservedZone && area(usedReservedZone) > 1 - ZONE_MIN_FREE + EPS) {
+    return { ok: false, error: `reservedZone must leave at least ${minFree} of the image free` };
+  }
+  if (
+    usedSafeArea && usedReservedZone
+    && area(usedSafeArea) - overlapArea(usedSafeArea, usedReservedZone) < ZONE_MIN_FREE * area(usedSafeArea) - EPS
+  ) {
+    return { ok: false, error: `reservedZone covers safeArea: at least ${minFree} of safeArea must stay outside reservedZone` };
+  }
+
+  // В careful меняется только выбранное и сказанное; в rebuild работа — сама
+  // пересборка (по зонам или просто как enhance).
+  if (mode === 'careful' && fixes.length === 0 && !notes) {
     return { ok: false, error: 'nothing to do: select at least one fix or write notes' };
   }
   // rebuild — это enhance: без заголовка или описания модели нечего писать,
@@ -168,7 +210,6 @@ export function validateRepairBannerImageParams(body: unknown): ValidationResult
     ok: true,
     params: {
       ...target.value,
-      advertiserId: target.value.advertiserId.trim(),
       mode,
       fixes,
       notes,

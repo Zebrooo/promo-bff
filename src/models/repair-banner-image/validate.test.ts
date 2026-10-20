@@ -100,6 +100,21 @@ describe('validateRepairBannerImageParams — режим и правки', () =>
     expect(errorOf(body({ fixes: [], notes: ' \n\t ' }))).toMatch(/nothing to do/);
   });
 
+  it('rebuild: список правок проверяется по форме и отбрасывается — в промпт он не идёт, своих данных не требует', () => {
+    const rebuild = { mode: 'rebuild', draft: { title: 'Заголовок' } };
+    const result = validateRepairBannerImageParams(body({ ...rebuild, fixes: ['fit_safe_area', 'restore_text'] }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.fixes).toEqual([]);
+    expect(errorOf(body({ ...rebuild, fixes: ['make_it_pop'] }))).toMatch(/unknown fix/);
+    expect(errorOf(body({ ...rebuild, fixes: ['contrast', 'contrast'] }))).toMatch(/duplicate fix/);
+  });
+
+  it('rebuild без правок и указаний — пересборка по зонам или просто enhance, а не «нечего делать»', () => {
+    const rebuild = { mode: 'rebuild', draft: { title: 'Заголовок' }, fixes: [] };
+    expect(validateRepairBannerImageParams(body({ ...rebuild, safeArea: { x: 0, y: 0.1, w: 1, h: 0.8 } })).ok).toBe(true);
+    expect(validateRepairBannerImageParams(body(rebuild)).ok).toBe(true);
+  });
+
   it('fit_safe_area без safeArea', () => {
     expect(errorOf(body({ fixes: ['fit_safe_area'] }))).toMatch(/fit_safe_area requires safeArea/);
   });
@@ -157,6 +172,13 @@ describe('validateRepairBannerImageParams — указания модерато�
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.params.notes).toBeUndefined();
   });
+
+  it('соединители U+200C/U+200D остаются: составное эмодзи не рассыпается', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    const result = validateRepairBannerImageParams(body({ notes: `Убери ${family} из угла` }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params.notes).toBe(`Убери ${family} из угла`);
+  });
 });
 
 describe('validateRepairBannerImageParams — зоны', () => {
@@ -189,6 +211,33 @@ describe('validateRepairBannerImageParams — зоны', () => {
     expect(errorOf(body({ reservedZone: { x: 0, y: 0, w: 1.5, h: 0.4 } }))).toMatch(/reservedZone/);
     expect(errorOf(body({ reservedZone: { ...reserved, y: -0.1 } }))).toMatch(/reservedZone/);
     expect(errorOf(body({ reservedZone: { ...reserved, x: 0.2 } }))).toMatch(/reservedZone/);
+  });
+
+  it('занятая зона почти на весь кадр невыполнима — когда она действует', () => {
+    const whole = { x: 0, y: 0, w: 1, h: 0.85 };
+    expect(errorOf(body({ fixes: ['free_overlay_zone'], reservedZone: whole })))
+      .toMatch(/reservedZone must leave at least 20 % of the image free/);
+    expect(errorOf(body({ mode: 'rebuild', draft: { title: 'Заголовок' }, reservedZone: whole }))).toMatch(/leave at least 20 %/);
+    // 80 % кадра — предел; без своей правки в careful зона не действует и не проверяется.
+    expect(validateRepairBannerImageParams(body({ fixes: ['free_overlay_zone'], reservedZone: { ...whole, h: 0.8 } })).ok).toBe(true);
+    expect(validateRepairBannerImageParams(body({ reservedZone: whole })).ok).toBe(true);
+  });
+
+  it('занятая зона поверх безопасной невыполнима: «внутри одной и вне другой» негде', () => {
+    const both = ['fit_safe_area', 'free_overlay_zone'];
+    const lower = { x: 0, y: 0.5, w: 1, h: 0.5 };
+    const covering = { x: 0, y: 0.4, w: 1, h: 0.6 };
+    expect(errorOf(body({ fixes: both, safeArea: lower, reservedZone: covering }))).toMatch(/reservedZone covers safeArea/);
+    // Свободно 10 % безопасной зоны — мало.
+    expect(errorOf(body({ fixes: both, safeArea: { x: 0, y: 0, w: 1, h: 0.8 }, reservedZone: { x: 0.1, y: 0, w: 0.9, h: 0.8 } })))
+      .toMatch(/covers safeArea/);
+    // Пример из README: свободно 66 % безопасной зоны.
+    expect(validateRepairBannerImageParams(body({ fixes: both, safeArea: safe, reservedZone: reserved })).ok).toBe(true);
+    // В rebuild зоны действуют сами по себе — та же проверка без правок.
+    expect(errorOf(body({ mode: 'rebuild', draft: { title: 'Заголовок' }, fixes: [], safeArea: lower, reservedZone: covering })))
+      .toMatch(/covers safeArea/);
+    // В careful без одной из правок пара не проверяется.
+    expect(validateRepairBannerImageParams(body({ fixes: ['fit_safe_area'], safeArea: lower, reservedZone: covering })).ok).toBe(true);
   });
 });
 
@@ -238,7 +287,11 @@ describe('validateRepairBannerImageParams — успешные тела', () => 
       draft: { description: 'Шиномонтаж 24/7' },
     }));
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.params.mode).toBe('rebuild');
+    if (result.ok) {
+      expect(result.params.mode).toBe('rebuild');
+      // Правки в rebuild не действуют — их нет и в параметрах.
+      expect(result.params.fixes).toEqual([]);
+    }
   });
 });
 
