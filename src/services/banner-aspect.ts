@@ -33,6 +33,24 @@ export function pickAspectRatio(width: number, height: number): ImageAspectRatio
   return best;
 }
 
+/** Что переживёт cover-кроп транскода: модель рисует кадр формы
+ *  pickAspectRatio, а файл нужен ровно W×H, и лишнее срезается по одной оси.
+ *  1160×240 просит 4:1 — от высоты остаётся 4 / 4,83 ≈ 83 %; 600×1000 просит
+ *  9:16 — остаётся 93,75 % высоты. keep = 1 — кадр уже нужной формы. */
+export interface CoverCrop {
+  /** Ось, по которой срезается кадр модели. */
+  axis: 'width' | 'height';
+  /** Доля кадра модели по этой оси, которая попадёт в файл, (0, 1]. */
+  keep: number;
+}
+
+export function coverCrop(width: number, height: number): CoverCrop {
+  const model = ratioValue(pickAspectRatio(width, height));
+  const target = width / height;
+  // Кадр модели шире слота — срезается ширина, у́же — высота.
+  return model > target ? { axis: 'width', keep: target / model } : { axis: 'height', keep: model / target };
+}
+
 /** Форма баннера для промпта: от неё зависит раскладка (полоса читается слева
  *  направо, постер — сверху вниз). Порог полосы 2,5 — тот же, что у витрины
  *  (`short` в AdSlot: на такой полосе заголовок-оверлей не рисуется). */

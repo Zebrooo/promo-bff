@@ -1209,6 +1209,67 @@ describe('POST /generate-banner-image', () => {
   });
 });
 
+describe('POST /repair-banner-image', () => {
+  // Та же заглушка модели, что у /generate-banner-image выше.
+  const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+  const imageDeps = (calls: OpenrouterImageCallParams[] = []) => ({
+    openrouterImage: {
+      async call(params: OpenrouterImageCallParams) {
+        calls.push(params);
+        return { imageDataUrl: PNG_1x1, model: 'google/test-image', costRub: 1 };
+      },
+    },
+    costLog: { append: async () => {} },
+  });
+  const payload = {
+    advertiserId: 'mod:42',
+    imageUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    width: 4,
+    height: 5,
+    mode: 'careful',
+    fixes: ['fit_safe_area'],
+    safeArea: { x: 0, y: 0.1, w: 1, h: 0.8 },
+    notes: 'Номер WhatsApp не меняй.',
+    draft: {},
+  };
+
+  it('401 без тикета', async () => {
+    const app = buildServer({ logger: false, deps: imageDeps() });
+    const res = await app.inject({ method: 'POST', url: '/repair-banner-image', payload });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('400 на правку без своих данных, модель не зовётся', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const app = buildServer({ logger: false, deps: imageDeps(calls) });
+    const res = await app.inject({
+      method: 'POST', url: '/repair-banner-image', headers: AUTH,
+      payload: { ...payload, safeArea: undefined },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(body(res)).toMatchObject({ error: 'bad_request', reason: 'fit_safe_area requires safeArea' });
+    expect(calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('200 с envelope ok: референс уходит модели, промпт бережной правки, webp под слот', async () => {
+    const calls: OpenrouterImageCallParams[] = [];
+    const app = buildServer({ logger: false, deps: imageDeps(calls) });
+    const res = await app.inject({ method: 'POST', url: '/repair-banner-image', headers: AUTH, payload });
+    expect(res.statusCode).toBe(200);
+    const json = body(res) as { status: string; data: { imageDataUrl: string; cacheHit: boolean; model: string } };
+    expect(json).toMatchObject({ status: 'ok', data: { cacheHit: false, model: 'google/test-image' } });
+    expect(json.data.imageDataUrl.startsWith('data:image/webp;base64,')).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].imageUrl).toBe(payload.imageUrl);
+    expect(calls[0].aspectRatio).toBe('4:5');
+    expect(calls[0].prompt).toContain('Edit the attached display-ad banner');
+    expect(calls[0].prompt).toContain('Номер WhatsApp не меняй.');
+    await app.close();
+  });
+});
+
 describe('health probes', () => {
   it('GET /health is 200 and unauthenticated', async () => {
     const app = buildServer({ logger: false });

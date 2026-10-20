@@ -1,4 +1,4 @@
-import type { EnhanceBannerImageParams } from './types';
+import type { BannerImageDraft, EnhanceBannerImageParams } from './types';
 
 export type ValidationResult =
   | { ok: true; params: EnhanceBannerImageParams }
@@ -8,12 +8,18 @@ const HTTP = /^https?:\/\//i;
 const DATA_URL = /^data:image\//i;
 const CTA_POSITIONS = ['tl', 'tr', 'bl', 'br'] as const;
 
-export function validateEnhanceBannerImageParams(body: unknown): ValidationResult {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { ok: false, error: 'body must be an object' };
-  }
-  const b = body as Record<string, unknown>;
+/** Общие поля картинки-по-референсу: кто платит, что за референс и какой
+ *  размер нужен. Их же проверяет /repair-banner-image — правила одни. */
+export interface BannerImageTarget {
+  advertiserId: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+}
 
+type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export function parseBannerImageTarget(b: Record<string, unknown>): Parsed<BannerImageTarget> {
   if (typeof b.advertiserId !== 'string' || b.advertiserId.trim() === '') {
     return { ok: false, error: 'advertiserId must be a non-empty string' };
   }
@@ -26,10 +32,17 @@ export function validateEnhanceBannerImageParams(body: unknown): ValidationResul
   if (typeof b.height !== 'number' || !Number.isInteger(b.height) || b.height <= 0 || b.height > 4096) {
     return { ok: false, error: 'height must be a positive integer ≤ 4096' };
   }
-  if (typeof b.draft !== 'object' || b.draft === null || Array.isArray(b.draft)) {
+  // Ключ лимита и учёта расходов — без случайных пробелов, одинаково у всех
+  // ручек картинок (generate-banner-image тоже обрезает).
+  return { ok: true, value: { advertiserId: b.advertiserId.trim(), imageUrl: b.imageUrl, width: b.width, height: b.height } };
+}
+
+/** Форма draft без требований к содержимому: что обязательно — решает ручка. */
+export function parseBannerImageDraft(raw: unknown): Parsed<BannerImageDraft> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return { ok: false, error: 'draft must be an object' };
   }
-  const draft = b.draft as Record<string, unknown>;
+  const draft = raw as Record<string, unknown>;
   if (draft.title !== undefined && typeof draft.title !== 'string') {
     return { ok: false, error: 'draft.title must be a string' };
   }
@@ -39,37 +52,53 @@ export function validateEnhanceBannerImageParams(body: unknown): ValidationResul
   if (draft.actionLabel !== undefined && typeof draft.actionLabel !== 'string') {
     return { ok: false, error: 'draft.actionLabel must be a string' };
   }
+  return {
+    ok: true,
+    value: {
+      title: typeof draft.title === 'string' ? draft.title : undefined,
+      description: typeof draft.description === 'string' ? draft.description : undefined,
+      actionLabel: typeof draft.actionLabel === 'string' ? draft.actionLabel : undefined,
+    },
+  };
+}
+
+export function parseCtaPosition(raw: unknown): Parsed<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string' || !(CTA_POSITIONS as readonly string[]).includes(raw)) {
+    return { ok: false, error: 'ctaPosition must be one of tl|tr|bl|br' };
+  }
+  return { ok: true, value: raw };
+}
+
+export function validateEnhanceBannerImageParams(body: unknown): ValidationResult {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { ok: false, error: 'body must be an object' };
+  }
+  const b = body as Record<string, unknown>;
+
+  const target = parseBannerImageTarget(b);
+  if (!target.ok) return target;
+  const draft = parseBannerImageDraft(b.draft);
+  if (!draft.ok) return draft;
   // At least one text field — otherwise there's nothing for the model to render
   // (we still want the image regenerated, but giving it text is the whole point).
   const hasText =
-    (typeof draft.title === 'string' && draft.title.trim() !== '') ||
-    (typeof draft.description === 'string' && draft.description.trim() !== '') ||
-    (typeof draft.actionLabel === 'string' && draft.actionLabel.trim() !== '');
+    (typeof draft.value.title === 'string' && draft.value.title.trim() !== '') ||
+    (typeof draft.value.description === 'string' && draft.value.description.trim() !== '') ||
+    (typeof draft.value.actionLabel === 'string' && draft.value.actionLabel.trim() !== '');
   if (!hasText) {
     return { ok: false, error: 'draft must contain at least one non-empty text field' };
   }
 
-  let ctaPosition: string | undefined;
-  if (b.ctaPosition !== undefined) {
-    if (typeof b.ctaPosition !== 'string' || !(CTA_POSITIONS as readonly string[]).includes(b.ctaPosition)) {
-      return { ok: false, error: 'ctaPosition must be one of tl|tr|bl|br' };
-    }
-    ctaPosition = b.ctaPosition;
-  }
+  const ctaPosition = parseCtaPosition(b.ctaPosition);
+  if (!ctaPosition.ok) return ctaPosition;
 
   return {
     ok: true,
     params: {
-      advertiserId: b.advertiserId,
-      imageUrl: b.imageUrl,
-      width: b.width,
-      height: b.height,
-      draft: {
-        title: typeof draft.title === 'string' ? draft.title : undefined,
-        description: typeof draft.description === 'string' ? draft.description : undefined,
-        actionLabel: typeof draft.actionLabel === 'string' ? draft.actionLabel : undefined,
-      },
-      ctaPosition,
+      ...target.value,
+      draft: draft.value,
+      ctaPosition: ctaPosition.value,
     },
   };
 }

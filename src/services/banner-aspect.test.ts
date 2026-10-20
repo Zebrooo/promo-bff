@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bannerShape, pickAspectRatio } from './banner-aspect';
+import { bannerShape, coverCrop, pickAspectRatio } from './banner-aspect';
 
 describe('pickAspectRatio', () => {
   it('полоса рекламодателя (2400×300, 1200×150) — ровно 8:1', () => {
@@ -46,5 +46,29 @@ describe('bannerShape', () => {
     expect(bannerShape(1000, 1000)).toBe('square');
     expect(bannerShape(1100, 1000)).toBe('square');
     expect(bannerShape(1000, 1100)).toBe('square');
+  });
+});
+
+describe('coverCrop', () => {
+  it('телефонная полоса 1160×240: кадр 4:1, от высоты остаётся ≈ 82,8 %', () => {
+    const crop = coverCrop(1160, 240);
+    expect(crop.axis).toBe('height');
+    expect(crop.keep).toBeCloseTo(4 / (1160 / 240), 10);
+  });
+
+  it('вертикаль 600×1000: кадр 9:16 у́же слота — срезается высота, остаётся 93,75 %', () => {
+    expect(coverCrop(600, 1000)).toEqual({ axis: 'height', keep: expect.closeTo(0.9375, 10) });
+  });
+
+  it('кадр модели шире слота — срезается ширина', () => {
+    // 1000×1100 (0,91) ближе всего к 1:1 — квадрат шире слота.
+    const crop = coverCrop(1000, 1100);
+    expect(crop.axis).toBe('width');
+    expect(crop.keep).toBeCloseTo(1000 / 1100, 10);
+  });
+
+  it('точная форма (600×750 → 4:5, 2400×300 → 8:1) — ничего не срезается', () => {
+    expect(coverCrop(600, 750).keep).toBe(1);
+    expect(coverCrop(2400, 300).keep).toBe(1);
   });
 });
