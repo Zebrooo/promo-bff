@@ -36,6 +36,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
 
+# Каталог под журнал стоимости ИИ (AI_COST_LOG_PATH): в него compose монтирует
+# именованный том. Пустой том при первом подключении берёт владельца у каталога
+# образа — поэтому каталог заводится здесь и отдаётся node. Без этого том
+# достаётся root-у, и каждая запись журнала падает с EACCES.
+RUN mkdir logs && chown node:node logs
+
 # Не root: сервис ходит в S3 и в две базы, лишние права ему ни к чему.
 USER node
 

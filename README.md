@@ -187,6 +187,12 @@ The proxy applies only to the text and image OpenRouter clients, never to
 Supabase, S3, or other BFF traffic. Production must provide a proxy URL reachable
 from the `promo-bff` container.
 
+The AI cost log (one JSONL line per real OpenRouter call) is written to
+`/app/logs/ai-cost.log` inside the named volume `promo-bff_logs`, so it survives
+container recreation on every deploy. Compose sets `AI_COST_LOG_PATH` itself;
+a value in `.env` is ignored. Read it with
+`docker exec promo-bff tail /app/logs/ai-cost.log`.
+
 ```bash
 curl -X POST http://localhost:3000/models \
   -H 'Content-Type: application/json' \
