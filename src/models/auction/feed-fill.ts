@@ -45,10 +45,14 @@ export async function handleFeedFill(
     return { status: 'error', reason: 'campaign_service_unavailable' };
   }
 
-  // Render each creative once; drop malformed ones before allocating.
+  // Render each creative once; drop malformed ones before allocating. A sized
+  // request gets the matching half of a wide/compact pair, like an /auction slot.
+  const target = params.width !== undefined && params.height !== undefined
+    ? { width: params.width, height: params.height }
+    : undefined;
   const ads = new Map<number, Advertisement>();
   const renderable = candidates.filter((c) => {
-    const ad = campaignToAd(c);
+    const ad = campaignToAd(c, target);
     if (ad === null) {
       logger?.error({ campaignId: c.id }, 'feed-fill: malformed creative, excluded');
       return false;

@@ -86,6 +86,35 @@ describe('handleFeedFill', () => {
     expect(res.data.every((ad) => !('imageVariants' in ad))).toBe(true);
   });
 
+  // Полосы ленты на телефоне (580×120) получали компьютерную половину пары
+  // (1200×150) и обрезали её по бокам — карусель с размером слота показывала
+  // телефонную. Размер места выбирает половину тем же правилом, что /auction.
+  it('serves the half of a wide/compact pair closest to the requested box', async () => {
+    const paired: CampaignCandidate = {
+      ...cand(1, 'A', 5000, 'horizontal'),
+      creative: {
+        format: 'banner',
+        title: 'ad-1',
+        imageUrl: 'https://i/wide.png',
+        imageVariants: {
+          wide: { imageUrl: 'https://i/wide.png', width: 1200, height: 150 },
+          compact: { imageUrl: 'https://i/compact.png', width: 580, height: 120 },
+        },
+      },
+    };
+    const fill = (size: { width?: number; height?: number }) =>
+      handleFeedFill({ count: 2, format: 'horizontal', ...size }, makeDeps([paired], { A: 100_000 }));
+
+    const phone = await fill({ width: 580, height: 120 });
+    const desktop = await fill({ width: 1200, height: 150 });
+    const unsized = await fill({});
+    if (phone.status !== 'ok' || desktop.status !== 'ok' || unsized.status !== 'ok') throw new Error('fill failed');
+    expect(phone.data.map((ad) => ad.imageUrl)).toEqual(['https://i/compact.png', 'https://i/compact.png']);
+    expect(desktop.data.map((ad) => ad.imageUrl)).toEqual(['https://i/wide.png', 'https://i/wide.png']);
+    // Без размера — как раньше: основная картинка кампании.
+    expect(unsized.data.map((ad) => ad.imageUrl)).toEqual(['https://i/wide.png', 'https://i/wide.png']);
+  });
+
   it('excludes malformed creatives before allocating', async () => {
     const broken = { ...cand(1, 'A', 9000), creative: { format: 'banner' } }; // no title → campaignToAd null
     const res = await handleFeedFill(

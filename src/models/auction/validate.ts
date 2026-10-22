@@ -201,5 +201,24 @@ export function validateFeedFillParams(body: unknown): FeedFillValidationResult 
     }
     params.freqCap = b.freqCap;
   }
+  if (b.width !== undefined || b.height !== undefined) {
+    if (
+      typeof b.width !== 'number' ||
+      typeof b.height !== 'number' ||
+      !Number.isInteger(b.width) ||
+      !Number.isInteger(b.height) ||
+      b.width <= 0 ||
+      b.height <= 0 ||
+      b.width > MAX_SLOT_DIMENSION ||
+      b.height > MAX_SLOT_DIMENSION
+    ) {
+      return {
+        ok: false,
+        error: `width and height must be provided together as positive integers up to ${MAX_SLOT_DIMENSION}`,
+      };
+    }
+    params.width = b.width;
+    params.height = b.height;
+  }
   return { ok: true, params };
 }
