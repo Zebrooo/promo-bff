@@ -55,6 +55,11 @@ export interface FeedFillParams {
   format?: string;
   /** Drop a campaign once this viewer has seen it >= freqCap times. Omit = no cap. */
   freqCap?: number;
+  /** Box of the feed position, CSS px. A wide/compact creative pair then serves
+   *  the closer-aspect half — the same rule as an /auction slot size. Omit = the
+   *  campaign's canonical image. */
+  width?: number;
+  height?: number;
 }
 
 /** Ordered fill (repeats allowed): the sequence of creatives to drop into the feed. */

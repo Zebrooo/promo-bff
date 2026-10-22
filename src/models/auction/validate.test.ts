@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAuctionParams } from './validate';
+import { validateAuctionParams, validateFeedFillParams } from './validate';
 
 describe('validateAuctionParams', () => {
   it('accepts a slots array of {slot, weight}', () => {
@@ -206,5 +206,29 @@ describe('validateAuctionParams', () => {
       slots: [{ ...grouped, singletonWidth: 1200, singletonHeight: 150 }],
       exposure: 'simultaneous',
     }).ok).toBe(false);
+  });
+});
+
+describe('validateFeedFillParams', () => {
+  it('accepts and preserves a positive bounded width+height pair', () => {
+    const r = validateFeedFillParams({ count: 3, format: 'horizontal', width: 580, height: 120 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params).toMatchObject({ count: 3, width: 580, height: 120 });
+  });
+  it('keeps an unsized request unsized', () => {
+    const r = validateFeedFillParams({ count: 3 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.params).not.toHaveProperty('width');
+      expect(r.params).not.toHaveProperty('height');
+    }
+  });
+  it('rejects partial, non-integer, non-positive, and unbounded sizes', () => {
+    expect(validateFeedFillParams({ count: 3, width: 580 }).ok).toBe(false);
+    expect(validateFeedFillParams({ count: 3, height: 120 }).ok).toBe(false);
+    expect(validateFeedFillParams({ count: 3, width: 580.5, height: 120 }).ok).toBe(false);
+    expect(validateFeedFillParams({ count: 3, width: 0, height: 120 }).ok).toBe(false);
+    expect(validateFeedFillParams({ count: 3, width: '580', height: 120 }).ok).toBe(false);
+    expect(validateFeedFillParams({ count: 3, width: 10_001, height: 120 }).ok).toBe(false);
   });
 });
