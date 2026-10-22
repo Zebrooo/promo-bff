@@ -51,6 +51,18 @@ services:
       # строку на тестовый домен — иначе тестовый кабинет разошлёт пуш боевым
       # пользователям.
       AA_BASE_URL: "https://abkhaz-auto.ru"
+      # Журнал стоимости ИИ — в томе `logs` (ниже), чтобы переживал пересоздание
+      # контейнера на каждом деплое. Путь задан здесь, рядом с томом, а не в
+      # .env: до 22.10.2026 .env указывал на /data/promo-bff/ai-cost.log, а
+      # каталога /data в контейнере нет — каждая запись падала с EACCES, и
+      # траты на OpenRouter не учитывались. environment перекрывает .env.
+      AI_COST_LOG_PATH: /app/logs/ai-cost.log
+    volumes:
+      # Именованный том, а не каталог хоста: каталог хоста docker создал бы от
+      # root, и node писать в него не смог бы. Том берёт владельца у /app/logs
+      # образа (см. Dockerfile). Прочитать журнал:
+      #   docker exec promo-bff tail /app/logs/ai-cost.log
+      - logs:/app/logs
     networks:
       # web — общая с витриной: она зовёт http://promo-bff:3191
       - web
@@ -87,6 +99,9 @@ networks:
   supabase-aa:
     external: true
     name: supabase-aa_default
+
+volumes:
+  logs:
 
 secrets:
   node_auth_token:
